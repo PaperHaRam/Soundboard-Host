@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Soundboard – 공유자</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --muted:#8a93a6; --accent:#6ee7b7; --text:#e8ecf3; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Apple SD Gothic Neo,Malgun Gothic,sans-serif;}
+  header{padding:16px 20px;border-bottom:1px solid #222732;background:#0c0f14;display:flex;gap:14px;align-items:center;justify-content:space-between}
+  h1{margin:0;font-size:18px;font-weight:700}
+  .row{display:flex;gap:16px;align-items:center}
+  .btn{background:#232939;color:var(--text);border:1px solid #2c3347;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:600}
+  .btn:hover{border-color:#3b435c}
+  .btn-accent{background:linear-gradient(90deg,#10b981,#34d399);color:#0b0f14;border:0}
+  .muted{color:var(--muted);font-size:12px}
+  main{padding:18px;display:grid;grid-template-columns:2fr 1fr;gap:18px}
+  .panel{background:var(--card);border:1px solid #222732;border-radius:14px;padding:14px}
+  .panel h2{margin:2px 0 10px 0;font-size:15px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  .card{background:#11151c;border:1px solid #202737;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .title{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .small{font-size:12px}
+  .range{width:100%}
+  .pill{padding:6px 10px;border-radius:999px;background:#1a2130;border:1px solid #263149;font-size:12px;color:#b7c0d9}
+  .hotbar{display:grid;grid-template-columns:repeat(10,1fr);gap:8px}
+  .slot{background:#0f1420;border:1px dashed #2a3250;border-radius:12px;min-height:70px;padding:8px;display:flex;flex-direction:column;gap:6px;justify-content:center;align-items:center}
+  .slot .k{font-size:12px;color:#9fb2d7}
+  .slot .name{font-weight:700;font-size:12px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .foot{position:fixed;left:16px;bottom:16px;display:flex;gap:10px;align-items:center}
+  .codebox{background:#0b0f14;border:1px solid #22314b;border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center}
+  .code{font-weight:800;font-size:16px;letter-spacing:1px}
+  .badge{background:#0b131f;border:1px solid #1b2b44;padding:4px 8px;border-radius:999px;font-size:11px;color:#9bb1d1}
+  .flex{display:flex;gap:12px;align-items:center}
+  .vstack{display:flex;flex-direction:column;gap:10px}
+  .divider{height:1px;background:#222733;margin:10px 0}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>사운드보드 (공유자)</h1>
+    <span class="badge">개별 볼륨 + 전체 볼륨 + 미니 보드 단축키(1~0)</span>
+  </div>
+  <div class="row">
+    <input id="fileInput" type="file" accept="audio/*" multiple class="btn" />
+    <button id="stopAll" class="btn">전체 정지</button>
+  </div>
+</header>
+
+<main>
+  <!-- 왼쪽: 메인 보드 -->
+  <section class="panel">
+    <h2>메인 사운드보드</h2>
+    <div class="vstack">
+      <div class="flex">
+        <span class="pill">보드 전체 볼륨</span>
+        <input id="masterVol" type="range" min="0" max="1" step="0.01" value="0.9" />
+        <span id="masterVolVal" class="small muted">0.90</span>
+      </div>
+      <div id="mainGrid" class="grid"></div>
+    </div>
+  </section>
+
+  <!-- 오른쪽: 미니 보드 + 도움말 -->
+  <aside class="panel">
+    <h2>미니 사운드보드 (단축키 1~0)</h2>
+    <div class="vstack">
+      <div class="flex">
+        <span class="pill">미니보드 전체 볼륨</span>
+        <input id="miniMasterVol" type="range" min="0" max="1" step="0.01" value="0.9" />
+        <span id="miniMasterVolVal" class="small muted">0.90</span>
+      </div>
+      <div id="miniGrid" class="hotbar"></div>
+      <div class="divider"></div>
+      <div class="muted small">
+        • 각 카드의 “할당” 버튼으로 미니보드 슬롯에 배치하세요.<br/>
+        • 숫자 키 <b>1,2,3,4,5,6,7,8,9,0</b>을 누르면 즉시 재생됩니다.
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- 좌하단: 공유 코드 생성기 -->
+<div class="foot">
+  <button id="makeCode" class="btn btn-accent">공유 코드 생성</button>
+  <div class="codebox">
+    <span class="muted small">공유 코드</span>
+    <span id="shareCode" class="code mono">—</span>
+  </div>
+  <span id="peerStatus" class="muted small">대기 중…</span>
+</div>
+
+<!-- PeerJS (퍼블릭 신호 서버 사용) -->
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+/** ========= 오디오 그래프 구성 ========= **/
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const mainMasterGain = audioCtx.createGain();
+const miniMasterGain = audioCtx.createGain();
+const overallMaster = audioCtx.createGain(); // 최종 마스터(메인+미니 합)
+mainMasterGain.gain.value = 0.9;
+miniMasterGain.gain.value = 0.9;
+overallMaster.gain.value = 1.0;
+
+// 믹서: (여기선 전체 마스터 = main + mini)
+mainMasterGain.connect(overallMaster);
+miniMasterGain.connect(overallMaster);
+
+// 최종 출력(로컬 스피커)
+overallMaster.connect(audioCtx.destination);
+
+// 공유용 MediaStreamDestination (이 출력을 원격으로 보냄)
+const shareDest = audioCtx.createMediaStreamDestination();
+overallMaster.connect(shareDest);
+
+const state = {
+  clips: [],          // {id, file, name, audioEl, srcNode, gainNode, isMini:false, slot:null}
+  miniSlots: Array(10).fill(null), // slot -> clipId
+  peer: null,
+  connectedPeers: new Set(),
+  code: null
+};
+
+// UI refs
+const fileInput = document.getElementById('fileInput');
+const mainGrid = document.getElementById('mainGrid');
+const miniGrid = document.getElementById('miniGrid');
+const masterVol = document.getElementById('masterVol');
+const masterVolVal = document.getElementById('masterVolVal');
+const miniMasterVol = document.getElementById('miniMasterVol');
+const miniMasterVolVal = document.getElementById('miniMasterVolVal');
+const stopAllBtn = document.getElementById('stopAll');
+const makeCodeBtn = document.getElementById('makeCode');
+const shareCodeEl = document.getElementById('shareCode');
+const peerStatus = document.getElementById('peerStatus');
+
+// 초기 미니 슬롯 그리드
+function renderMiniGrid() {
+  miniGrid.innerHTML = '';
+  const keys = ['1','2','3','4','5','6','7','8','9','0'];
+  for (let i=0;i<10;i++) {
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    const k = document.createElement('div'); k.className = 'k'; k.textContent = `키 ${keys[i]}`;
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = state.miniSlots[i]?.name || '—';
+    const unassignBtn = document.createElement('button');
+    unassignBtn.className = 'btn small';
+    unassignBtn.textContent = '해제';
+    unassignBtn.onclick = () => { state.miniSlots[i] = null; renderMiniGrid(); };
+    slot.appendChild(k);
+    slot.appendChild(name);
+    if (state.miniSlots[i]) slot.appendChild(unassignBtn);
+    miniGrid.appendChild(slot);
+  }
+}
+renderMiniGrid();
+
+// 파일 업로드 처리
+fileInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const audioEl = new Audio(url);
+    audioEl.preload = 'auto';
+    audioEl.crossOrigin = 'anonymous';
+    audioEl.controls = false;
+
+    const srcNode = audioCtx.createMediaElementSource(audioEl);
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = 1.0;
+    srcNode.connect(gainNode).connect(mainMasterGain);
+
+    const clip = {
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      audioEl,
+      srcNode,
+      gainNode,
+      isMini:false,
+      slot:null
+    };
+    state.clips.push(clip);
+    addClipCard(clip);
+  }
+  fileInput.value = '';
+});
+
+// 메인 그리드 카드 생성
+function addClipCard(clip){
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = `clip-${clip.id}`;
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = clip.name;
+
+  const controls = document.createElement('div');
+  controls.className = 'controls';
+
+  const playBtn = document.createElement('button'); playBtn.className='btn'; playBtn.textContent='재생';
+  playBtn.onclick = ()=>{ clip.audioEl.currentTime = 0; clip.audioEl.play(); };
+
+  const pauseBtn = document.createElement('button'); pauseBtn.className='btn'; pauseBtn.textContent='일시정지';
+  pauseBtn.onclick = ()=> clip.audioEl.pause();
+
+  const resumeBtn = document.createElement('button'); resumeBtn.className='btn'; resumeBtn.textContent='이어재생';
+  resumeBtn.onclick = ()=> clip.audioEl.play();
+
+  const assignWrap = document.createElement('div'); assignWrap.className='controls';
+  const slotSelect = document.createElement('select'); slotSelect.className='btn';
+  const keys = ['1','2','3','4','5','6','7','8','9','0'];
+  keys.forEach((k,idx)=> {
+    const opt = document.createElement('option'); opt.value = idx; opt.textContent = `키 ${k}`;
+    slotSelect.appendChild(opt);
+  });
+  const assignBtn = document.createElement('button'); assignBtn.className='btn'; assignBtn.textContent='미니보드 할당';
+  assignBtn.onclick = ()=>{
+    const idx = parseInt(slotSelect.value,10);
+    state.miniSlots[idx] = { clipId: clip.id, name: clip.name };
+    clip.isMini = true; clip.slot = idx;
+    renderMiniGrid();
+  };
+  assignWrap.appendChild(slotSelect); assignWrap.appendChild(assignBtn);
+
+  const volWrap = document.createElement('div'); volWrap.className='vstack';
+  const volLabel = document.createElement('div'); volLabel.className='small muted'; volLabel.textContent='개별 볼륨';
+  const vol = document.createElement('input'); vol.type='range'; vol.min='0'; vol.max='1'; vol.step='0.01'; vol.value='1.0'; vol.className='range';
+  const volVal = document.createElement('div'); volVal.className='small muted'; volVal.textContent='1.00';
+  vol.oninput = ()=> { clip.gainNode.gain.value = parseFloat(vol.value); volVal.textContent = (+vol.value).toFixed(2); };
+
+  volWrap.appendChild(volLabel); volWrap.appendChild(vol); volWrap.appendChild(volVal);
+
+  controls.appendChild(playBtn);
+  controls.appendChild(pauseBtn);
+  controls.appendChild(resumeBtn);
+
+  card.appendChild(title);
+  card.appendChild(controls);
+  card.appendChild(assignWrap);
+  card.appendChild(volWrap);
+
+  mainGrid.appendChild(card);
+}
+
+// 전체 정지
+stopAllBtn.onclick = () => {
+  state.clips.forEach(c=> c.audioEl.pause());
+};
+
+// 마스터 볼륨들
+masterVol.oninput = ()=>{
+  mainMasterGain.gain.value = parseFloat(masterVol.value);
+  masterVolVal.textContent = (+masterVol.value).toFixed(2);
+};
+miniMasterVol.oninput = ()=>{
+  miniMasterGain.gain.value = parseFloat(miniMasterVol.value);
+  miniMasterVolVal.textContent = (+miniMasterVol.value).toFixed(2);
+};
+
+// 단축키 핸들링(1~0)
+window.addEventListener('keydown', (e)=>{
+  const map = {'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
+  if (e.key in map) {
+    const idx = map[e.key];
+    const slot = state.miniSlots[idx];
+    if (!slot) return;
+    const clip = state.clips.find(c=> c.id === slot.clipId);
+    if (!clip) return;
+    // 미니보드는 미니 마스터에 연결되도록 라우팅 변경
+    try {
+      clip.srcNode.disconnect();
+    } catch(_) {}
+    clip.srcNode.connect(clip.gainNode).connect(miniMasterGain);
+    clip.audioEl.currentTime = 0;
+    clip.audioEl.play();
+  }
+});
+
+// ======== 공유 코드(PeerJS) ========
+function genCode() {
+  // 쉬운 6자 코드
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i=0;i<6;i++) s += alphabet[Math.floor(Math.random()*alphabet.length)];
+  return s;
+}
+
+makeCodeBtn.onclick = ()=>{
+  if (state.peer) { alert("이미 코드가 생성되었습니다: " + state.code); return; }
+  const code = genCode();
+  // 퍼블릭 PeerJS Cloud 신호 서버 사용
+  const peer = new Peer(code, {
+    debug: 1, // 로그 보고 싶으면 2
+    // 필요시 자체 PeerServer:
+    // host: 'your-peer-server.com', port: 443, path: '/myapp', secure: true
+  });
+  state.peer = peer;
+  state.code = code;
+  shareCodeEl.textContent = code;
+  peerStatus.textContent = "신호 서버 연결 중…";
+
+  peer.on('open', (id)=>{
+    peerStatus.textContent = `준비됨: 코드 ${id} (청취자 접속 시 오디오 전송)`;
+  });
+
+  peer.on('connection', (conn)=>{
+    state.connectedPeers.add(conn.peer);
+    conn.on('open', ()=>{
+      // 데이터 연결이 열리면, 이 청취자에게 오디오 스트림 Call 발신
+      const stream = shareDest.stream; // 전체 믹스
+      const call = state.peer.call(conn.peer, stream, {metadata:{kind:'mixaudio'}});
+      // (선택) 현재 상태 전송
+      conn.send({type:'hello', now: Date.now(), code: state.code});
+      peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
+    });
+    conn.on('close', ()=>{
+      state.connectedPeers.delete(conn.peer);
+      peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
+    });
+  });
+
+  peer.on('error', (err)=>{
+    console.error(err);
+    peerStatus.textContent = '오류: ' + err.message;
+    alert("Peer 오류: " + err.message + "\n(다시 시도하거나 다른 코드로 생성해보세요)");
+  });
+
+  peer.on('disconnected', ()=>{
+    peerStatus.textContent = '신호 서버와 연결 끊김(자동 재시도 중)';
+    peer.reconnect();
+  });
+};
+</script>
+</body>
+</html>
