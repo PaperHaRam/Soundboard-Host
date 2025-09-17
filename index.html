@@ -34,6 +34,7 @@
   .card-head{padding:12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:center}
   .title{font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .badge{font-size:11px;color:#b6c5e3}
+  .badge.playing{color:#0affcf}
   .card-body{padding:10px;display:flex;flex-direction:column;gap:10px}
   .controls{display:flex;gap:8px;flex-wrap:wrap}
   .kv{display:flex;align-items:center;gap:8px}
@@ -52,13 +53,20 @@
   input[type="file"]{color:#9fb0c9}
   .section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
   .pill-blue{background:#0b1730;border:1px solid #1a3b70}
+  /* progress bar */
+  .prog-wrap{display:flex;flex-direction:column;gap:6px}
+  .prog-row{display:flex;justify-content:space-between;align-items:center}
+  .time{font-size:12px;color:#c9d6f5}
+  input[type="range"].seek{width:100%}
+  /* Now Playing list */
+  .np-item{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:10px;background:#0f1624}
 </style>
 </head>
 <body>
 <header>
   <div class="row">
     <h1>사운드보드 (호스트)</h1>
-    <span class="sub">개별 볼륨 / 보드별 마스터 / 반복 재생 / 미니보드 드래그 재정렬 / 프리셋 / 공유 스트리밍</span>
+    <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 미니보드 드래그 · 프리셋 · 공유</span>
   </div>
   <div class="row">
     <label class="btn">
@@ -100,7 +108,7 @@
     <div id="mainGrid" class="grid"></div>
   </section>
 
-  <!-- 오른쪽: 미니 보드 -->
+  <!-- 오른쪽: 미니 보드 + Now Playing -->
   <aside class="panel">
     <div class="section-head">
       <h2>미니 사운드보드</h2>
@@ -121,9 +129,11 @@
     <div class="divider"></div>
     <div class="small">
       • 슬롯을 <b>드래그&드롭</b>해 순서를 바꿀 수 있습니다(빈 슬롯 포함).<br/>
-      • 카드의 “미니보드 할당”으로 슬롯에 배치 → 숫자 키 <b>1~0</b> 즉시 재생.<br/>
-      • 메인/미니는 각각 **별도 마스터 볼륨**과 **별도 전체 정지**를 가집니다.
+      • 카드의 “미니보드 할당” → 숫자 키 <b>1~0</b> 즉시 재생.
     </div>
+    <div class="divider"></div>
+    <h2 style="margin:0 0 8px 0;font-size:15px">지금 재생 중</h2>
+    <div id="nowPlaying"></div>
   </aside>
 </main>
 
@@ -160,18 +170,21 @@ overallMaster.connect(audioCtx.destination);
 const shareDest = audioCtx.createMediaStreamDestination();
 overallMaster.connect(shareDest);
 
+// ======= 상태 =======
 const state = {
-  clips: [],          // {id, file, name, size, audioEl, srcNode, gainNode, loop, route:'main'|'mini', slot:null}
+  clips: [],          // {id, file, name, size, audioEl, srcNode, gainNode, loop, route:'main'|'mini', slot:null, ui:{...}}
   miniSlots: Array(10).fill(null), // {clipId, name}
   peer: null,
   connectedPeers: new Set(),
-  code: null
+  code: null,
+  rafId: null
 };
 
-// UI refs
+// ======= UI refs =======
 const fileInput = document.getElementById('fileInput');
 const mainGrid = document.getElementById('mainGrid');
 const miniGrid = document.getElementById('miniGrid');
+const nowPlayingEl = document.getElementById('nowPlaying');
 const masterVol = document.getElementById('masterVol');
 const masterVolVal = document.getElementById('masterVolVal');
 const miniMasterVol = document.getElementById('miniMasterVol');
@@ -181,13 +194,21 @@ const stopMiniBtn = document.getElementById('stopMini');
 const makeCodeBtn = document.getElementById('makeCode');
 const shareCodeEl = document.getElementById('shareCode');
 const peerStatus = document.getElementById('peerStatus');
-
 const saveLSBtn = document.getElementById('saveLS');
 const loadLSBtn = document.getElementById('loadLS');
 const exportBtn = document.getElementById('exportPreset');
 const importInput = document.getElementById('importPreset');
 
-// 초기 미니 슬롯 렌더
+// ======= Utils =======
+function fmtTime(sec){
+  if (!isFinite(sec) || sec<0) return '00:00';
+  const m = Math.floor(sec/60);
+  const s = Math.floor(sec%60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function mkSmall(t){ const s=document.createElement('span'); s.className='small'; s.textContent=t; return s; }
+
+// ======= 미니 슬롯 렌더/드래그 =======
 function renderMiniGrid() {
   miniGrid.innerHTML = '';
   const keys = ['1','2','3','4','5','6','7','8','9','0'];
@@ -205,7 +226,6 @@ function renderMiniGrid() {
     slot.appendChild(k);
     slot.appendChild(name);
 
-    // 드래그 가능 핸들(할당된 슬롯만)
     if (payload) {
       const handle = document.createElement('button');
       handle.className = 'btn btn-ghost';
@@ -223,7 +243,6 @@ function renderMiniGrid() {
     miniGrid.appendChild(slot);
   }
 }
-
 let draggingSlotIndex = null;
 function onSlotDragStart(e, fromIndex){
   draggingSlotIndex = fromIndex;
@@ -236,28 +255,18 @@ function onSlotDrop(e){
   const fromIndex = draggingSlotIndex ?? parseInt(e.dataTransfer.getData('text/plain'),10);
   this.classList.remove('drag-over');
   if (Number.isNaN(fromIndex) || Number.isNaN(toIndex) || fromIndex === toIndex) return;
-
-  // 이동/스왑 처리: from → to (to에 기존 값 있으면 스왑)
   const fromVal = state.miniSlots[fromIndex];
   const toVal = state.miniSlots[toIndex];
   state.miniSlots[toIndex] = fromVal;
   state.miniSlots[fromIndex] = toVal;
-
-  // clip.slot 표시도 갱신
-  if (fromVal) {
-    const c = state.clips.find(x=> x.id === fromVal.clipId);
-    if (c) c.slot = toIndex;
-  }
-  if (toVal) {
-    const c = state.clips.find(x=> x.id === toVal.clipId);
-    if (c) c.slot = fromIndex;
-  }
+  if (fromVal) { const c = state.clips.find(x=> x.id === fromVal.clipId); if (c) c.slot = toIndex; }
+  if (toVal) { const c = state.clips.find(x=> x.id === toVal.clipId); if (c) c.slot = fromIndex; }
   draggingSlotIndex = null;
   renderMiniGrid();
 }
 renderMiniGrid();
 
-/** ========= 파일 업로드 ========= **/
+// ======= 파일 업로드 =======
 fileInput.addEventListener('change', async (e) => {
   const files = Array.from(e.target.files || []);
   for (const file of files) {
@@ -283,15 +292,18 @@ fileInput.addEventListener('change', async (e) => {
       gainNode,
       loop: true,
       route: 'main',
-      slot: null
+      slot: null,
+      ui: {} // 나중에 채움
     };
     state.clips.push(clip);
     addClipCard(clip);
+    hookClipEvents(clip);
   }
   fileInput.value = '';
+  ensureRAF();
 });
 
-/** ========= 카드 생성 ========= **/
+// ======= 카드 생성 (길이/진행바/재생중 표시 포함) =======
 function addClipCard(clip){
   const card = document.createElement('div');
   card.className = 'card';
@@ -304,6 +316,19 @@ function addClipCard(clip){
   head.appendChild(title); head.appendChild(badge);
 
   const body = document.createElement('div'); body.className = 'card-body';
+
+  // 0) 시간/진행바
+  const progWrap = document.createElement('div'); progWrap.className='prog-wrap';
+  const progRow = document.createElement('div'); progRow.className='prog-row';
+  const curT = document.createElement('span'); curT.className='time'; curT.textContent='00:00';
+  const durT = document.createElement('span'); durT.className='time'; durT.textContent='--:--';
+  const seek = document.createElement('input'); seek.type='range'; seek.className='seek'; seek.min='0'; seek.max='1'; seek.step='0.001'; seek.value='0';
+  seek.addEventListener('input', ()=> {
+    const d = clip.audioEl.duration || 0;
+    if (d>0) { clip.audioEl.currentTime = parseFloat(seek.value) * d; }
+  });
+  progRow.appendChild(curT); progRow.appendChild(durT);
+  progWrap.appendChild(seek); progWrap.appendChild(progRow);
 
   // 1) 재생/정지/이어재생 + 삭제
   const ctrlRow = document.createElement('div'); ctrlRow.className = 'controls';
@@ -320,7 +345,7 @@ function addClipCard(clip){
   delBtn.onclick = ()=> deleteClip(clip);
   ctrlRow.appendChild(playBtn); ctrlRow.appendChild(pauseBtn); ctrlRow.appendChild(resumeBtn); ctrlRow.appendChild(delBtn);
 
-  // 2) 반복 토글 (기본 ON)
+  // 2) 반복 토글
   const loopRow = document.createElement('div'); loopRow.className = 'controls';
   const loopBtn = document.createElement('button'); loopBtn.className = 'btn';
   const loopLabel = ()=> loopBtn.textContent = '반복: ' + (clip.loop ? 'ON' : 'OFF');
@@ -360,6 +385,7 @@ function addClipCard(clip){
   };
   assignRow.appendChild(slotSelect); assignRow.appendChild(assignBtn);
 
+  body.appendChild(progWrap);
   body.appendChild(ctrlRow);
   body.appendChild(loopRow);
   body.appendChild(volWrap);
@@ -368,42 +394,109 @@ function addClipCard(clip){
   card.appendChild(head);
   card.appendChild(body);
   mainGrid.appendChild(card);
+
+  // UI 핸들 저장
+  clip.ui = { card, badge, curT, durT, seek };
 }
 
-// 유틸: 작은 텍스트
-function mkSmall(t){ const s=document.createElement('span'); s.className='small'; s.textContent=t; return s; }
+// ======= 클립 이벤트 바인딩(길이/진행/상태 업데이트) =======
+function hookClipEvents(clip){
+  const { audioEl, ui } = clip;
+  audioEl.addEventListener('loadedmetadata', ()=>{
+    ui.durT.textContent = fmtTime(audioEl.duration || 0);
+  });
+  audioEl.addEventListener('play', ()=>{
+    ui.badge.classList.add('playing');
+    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력 · 재생중';
+    updateNowPlaying();
+    ensureRAF();
+  });
+  audioEl.addEventListener('pause', ()=>{
+    ui.badge.classList.remove('playing');
+    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력';
+    updateNowPlaying();
+  });
+  audioEl.addEventListener('ended', ()=>{
+    // loop=false 인 경우에만 ended 발생
+    ui.seek.value = '0'; ui.curT.textContent = '00:00';
+    ui.badge.classList.remove('playing');
+    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력';
+    updateNowPlaying();
+  });
+}
 
-/** ========= 라우팅 제어 ========= **/
+// 진행/현재시간 repaint (requestAnimationFrame)
+function tick(){
+  let anyPlaying = false;
+  for (const c of state.clips) {
+    const a = c.audioEl;
+    if (!a) continue;
+    if (!isNaN(a.duration) && a.duration>0){
+      const ratio = Math.min(1, Math.max(0, a.currentTime / a.duration));
+      c.ui.seek.value = String(ratio);
+      c.ui.curT.textContent = fmtTime(a.currentTime);
+      if (a.loop && !isNaN(a.duration)) { c.ui.durT.textContent = fmtTime(a.duration); }
+    }
+    if (!a.paused && !a.ended) anyPlaying = true;
+  }
+  if (anyPlaying) {
+    state.rafId = requestAnimationFrame(tick);
+  } else {
+    state.rafId = null;
+  }
+}
+function ensureRAF(){
+  if (!state.rafId) state.rafId = requestAnimationFrame(tick);
+}
+
+// ======= Now Playing 목록 =======
+function updateNowPlaying(){
+  nowPlayingEl.innerHTML = '';
+  const playing = state.clips.filter(c => !c.audioEl.paused && !c.audioEl.ended);
+  if (playing.length === 0){
+    nowPlayingEl.innerHTML = '<div class="small">재생 중인 트랙이 없습니다.</div>';
+    return;
+  }
+  for (const c of playing){
+    const d = document.createElement('div');
+    d.className = 'np-item';
+    const left = document.createElement('div');
+    left.textContent = c.name;
+    const right = document.createElement('div');
+    right.className = 'small';
+    right.textContent = `${c.route==='mini'?'미니':'메인'} · ${fmtTime(c.audioEl.currentTime)} / ${fmtTime(c.audioEl.duration||0)}`;
+    d.appendChild(left); d.appendChild(right);
+    nowPlayingEl.appendChild(d);
+  }
+}
+
+// ======= 라우팅 =======
 function routeClip(clip, route, badgeEl){
-  if (clip.route === route) return;
+  if (clip.route === route) { badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중'); return; }
   try { clip.srcNode.disconnect(); } catch(_) {}
   if (route === 'main') {
     clip.srcNode.connect(clip.gainNode).connect(mainMasterGain);
-    badgeEl.textContent = '메인 출력';
   } else {
     clip.srcNode.connect(clip.gainNode).connect(miniMasterGain);
-    badgeEl.textContent = '미니 출력';
   }
   clip.route = route;
+  badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중');
 }
 
-/** ========= 삭제 ========= **/
+// ======= 삭제 =======
 function deleteClip(clip){
-  // 재생 중지
   try { clip.audioEl.pause(); } catch(_){}
-  // 슬롯에서 제거
   state.miniSlots = state.miniSlots.map(s => s && s.clipId === clip.id ? null : s);
   renderMiniGrid();
-  // 오디오 노드 연결 해제
   try { clip.srcNode.disconnect(); } catch(_){}
   try { clip.gainNode.disconnect(); } catch(_){}
-  // 리스트/DOM에서 제거
   state.clips = state.clips.filter(c => c.id !== clip.id);
   const card = document.getElementById(`clip-${clip.id}`);
   if (card && card.parentNode) card.parentNode.removeChild(card);
+  updateNowPlaying();
 }
 
-/** ========= 보드별 전체 정지 ========= **/
+// ======= 보드별 전체 정지 =======
 stopMainBtn.onclick = ()=>{
   state.clips.filter(c=>c.route==='main').forEach(c=> c.audioEl.pause());
 };
@@ -411,7 +504,7 @@ stopMiniBtn.onclick = ()=>{
   state.clips.filter(c=>c.route==='mini').forEach(c=> c.audioEl.pause());
 };
 
-/** ========= 마스터 볼륨 ========= **/
+// ======= 마스터 볼륨 =======
 masterVol.oninput = ()=>{
   mainMasterGain.gain.value = parseFloat(masterVol.value);
   masterVolVal.textContent = (+masterVol.value).toFixed(2);
@@ -421,7 +514,7 @@ miniMasterVol.oninput = ()=>{
   miniMasterVolVal.textContent = (+miniMasterVol.value).toFixed(2);
 };
 
-/** ========= 단축키 (미니보드 1~0) ========= **/
+// ======= 단축키 (미니보드 1~0) =======
 window.addEventListener('keydown', (e)=>{
   const map = {'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
   if (!(e.key in map)) return;
@@ -431,21 +524,18 @@ window.addEventListener('keydown', (e)=>{
   const clip = state.clips.find(c=> c.id === slot.clipId);
   if (!clip) return;
 
-  // 미니 라우트로 보장
-  const card = document.getElementById(`clip-${clip.id}`);
-  const badgeEl = card?.querySelector('.card-head .badge') || {textContent:''};
+  const badgeEl = clip.ui?.badge || {textContent:''};
   routeClip(clip, 'mini', badgeEl);
 
-  // 반복 설정 유지하여 재생
   clip.audioEl.loop = clip.loop;
   clip.audioEl.currentTime = 0;
   clip.audioEl.play();
 });
 
-/** ========= 프리셋 직렬화 ========= **/
+// ======= 프리셋 직렬화/적용 =======
 function serializePreset(){
   return {
-    version: 1,
+    version: 2,
     mainMaster: mainMasterGain.gain.value,
     miniMaster: miniMasterGain.gain.value,
     clips: state.clips.map(c=> ({
@@ -453,22 +543,15 @@ function serializePreset(){
       size: c.size ?? null,
       loop: !!c.loop,
       volume: c.gainNode.gain.value,
-      route: c.route,
-      // 슬롯은 아래 miniSlots에서 별도 관리
+      route: c.route
     })),
     miniSlots: state.miniSlots.map(s => s ? { name: s.name } : null)
   };
 }
-
-// 프리셋을 현재 업로드된 파일들과 매칭(파일명+크기 우선, 크기 없으면 이름만)
 function applyPreset(preset){
   if (!preset || !preset.clips) return;
-
-  // 마스터 볼륨
   if (typeof preset.mainMaster === 'number') { mainMasterGain.gain.value = preset.mainMaster; masterVol.value = preset.mainMaster; masterVolVal.textContent = preset.mainMaster.toFixed(2); }
   if (typeof preset.miniMaster === 'number') { miniMasterGain.gain.value = preset.miniMaster; miniMasterVol.value = preset.miniMaster; miniMasterVolVal.textContent = preset.miniMaster.toFixed(2); }
-
-  // 클립 매칭
   preset.clips.forEach(pc => {
     const match = state.clips.find(c => (pc.size!=null && c.size===pc.size && c.name===pc.name) || (pc.size==null && c.name===pc.name));
     if (!match) return;
@@ -476,74 +559,56 @@ function applyPreset(preset){
     match.audioEl.loop = match.loop;
     if (typeof pc.volume === 'number') { match.gainNode.gain.value = pc.volume; }
     if (pc.route === 'mini' || pc.route === 'main') {
-      const card = document.getElementById(`clip-${match.id}`);
-      const badgeEl = card?.querySelector('.card-head .badge') || {textContent:''};
+      const badgeEl = match.ui?.badge || {textContent:''};
       routeClip(match, pc.route, badgeEl);
     }
   });
-
-  // 미니 슬롯 재구성(이름으로 찾아 할당)
   state.miniSlots = preset.miniSlots.map((s)=>{
     if (!s) return null;
     const clip = state.clips.find(c=> c.name === s.name);
     return clip ? { clipId: clip.id, name: clip.name } : null;
   });
-  // clip.slot도 동기화
   state.clips.forEach(c=> c.slot=null);
   state.miniSlots.forEach((s,idx)=> { if (s){ const c=state.clips.find(x=>x.id===s.clipId); if(c) c.slot=idx; } });
   renderMiniGrid();
 }
-
-/** ========= 프리셋: 로컬스토리지 & 파일 ========= **/
-const LS_KEY = 'soundboard_preset_v1';
-
+const LS_KEY = 'soundboard_preset_v2';
 document.getElementById('saveLS').onclick = ()=>{
-  const preset = serializePreset();
-  localStorage.setItem(LS_KEY, JSON.stringify(preset));
+  localStorage.setItem(LS_KEY, JSON.stringify(serializePreset()));
   alert('로컬에 저장되었습니다.');
 };
-
 document.getElementById('loadLS').onclick = ()=>{
   const raw = localStorage.getItem(LS_KEY);
   if (!raw) { alert('저장된 프리셋이 없습니다.'); return; }
   try { applyPreset(JSON.parse(raw)); } catch(e){ alert('프리셋 적용 중 오류: '+e.message); }
 };
-
 document.getElementById('exportPreset').onclick = ()=>{
-  const preset = serializePreset();
-  const blob = new Blob([JSON.stringify(preset,null,2)], {type:'application/json'});
+  const blob = new Blob([JSON.stringify(serializePreset(),null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = 'soundboard_preset.json';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = 'soundboard_preset.json';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 };
-
 document.getElementById('importPreset').addEventListener('change', async (e)=>{
   const file = e.target.files?.[0];
   if (!file) return;
   try {
     const text = await file.text();
-    const preset = JSON.parse(text);
-    applyPreset(preset);
+    applyPreset(JSON.parse(text));
   } catch (err) {
-    alert('프리셋 파일을 읽는 중 오류가 발생했습니다: ' + err.message);
+    alert('프리셋 파일을 읽는 중 오류: ' + err.message);
   } finally {
     e.target.value = '';
   }
 });
 
-/** ========= 공유 코드 (PeerJS) ========= **/
+// ======= 공유 코드 (PeerJS) =======
 function genCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
   for (let i=0;i<6;i++) s += alphabet[Math.floor(Math.random()*alphabet.length)];
   return s;
 }
-
 makeCodeBtn.onclick = ()=>{
   if (state.peer) { alert("이미 코드가 생성되었습니다: " + state.code); return; }
   const code = genCode();
@@ -556,11 +621,10 @@ makeCodeBtn.onclick = ()=>{
   peer.on('open', (id)=>{
     peerStatus.textContent = `준비됨: 코드 ${id} (청취자 접속 시 오디오 전송)`;
   });
-
   peer.on('connection', (conn)=>{
     state.connectedPeers.add(conn.peer);
     conn.on('open', ()=>{
-      const stream = shareDest.stream; // 전체 믹스
+      const stream = shareDest.stream;
       state.peer.call(conn.peer, stream, {metadata:{kind:'mixaudio'}});
       conn.send({type:'hello', now: Date.now(), code: state.code});
       peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
@@ -570,13 +634,11 @@ makeCodeBtn.onclick = ()=>{
       peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
     });
   });
-
   peer.on('error', (err)=>{
     console.error(err);
     peerStatus.textContent = '오류: ' + err.message;
     alert("Peer 오류: " + err.message + "\n(다시 시도하거나 다른 코드로 생성해보세요)");
   });
-
   peer.on('disconnected', ()=>{
     peerStatus.textContent = '신호 서버와 연결 끊김(자동 재시도 중)';
     peer.reconnect();
