@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Soundboard – 호스트(공유자)</title>
+<title>Soundboard – 호스트</title>
 <style>
   :root {
     --bg:#0d1117; --surface:#0f141b; --card:#121826; --line:#1f2a3a;
@@ -64,7 +64,7 @@
 <header>
   <div class="row">
     <h1>사운드보드 (호스트)</h1>
-    <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 미니보드 드래그 · 공유</span>
+    <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 미니보드 드래그 · 삭제 · 공유</span>
   </div>
   <div class="row">
     <button id="unlockAudio" class="btn">🔊 소리 켜기</button>
@@ -91,6 +91,7 @@
         <input id="masterVol" type="range" min="0" max="1" step="0.01" value="0.9" />
         <span id="masterVolVal" class="small">0.90</span>
       </div>
+    </div>
 
     <div id="mainGrid" class="grid"></div>
   </section>
@@ -137,10 +138,8 @@
 <!-- PeerJS -->
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-/** ========= 오디오 컨텍스트 & 언락 유틸 ========= **/
+/** ========= 오디오 컨텍스트 & 언락 ========= **/
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-// 오디오 언락 버튼
 const unlockBtn = document.getElementById('unlockAudio');
 const ensureUnlocked = async () => {
   try { await audioCtx.resume(); } catch(e){}
@@ -149,14 +148,10 @@ const ensureUnlocked = async () => {
 };
 unlockBtn.addEventListener('click', ensureUnlocked, { once:true });
 
-// 안전 재생 래퍼: 언락 보장 + 에러 안내
 async function safePlay(audioEl){
-  if (audioCtx.state !== 'running') {
-    try { await audioCtx.resume(); } catch(e){}
-  }
-  try {
-    await audioEl.play();
-  } catch (err) {
+  if (audioCtx.state !== 'running') { try { await audioCtx.resume(); } catch(e){} }
+  try { await audioEl.play(); }
+  catch (err){
     console.warn('play() 실패:', err);
     alert('브라우저 오디오 자동재생 정책으로 차단됐습니다. 상단의 "소리 켜기" 버튼을 먼저 눌러주세요.');
     throw err;
@@ -178,17 +173,12 @@ overallMaster.connect(audioCtx.destination);
 const shareDest = audioCtx.createMediaStreamDestination();
 overallMaster.connect(shareDest);
 
-// ======= 상태 =======
+/** ========= 상태 & UI ========= **/
 const state = {
-  clips: [],          // {id, file, name, size, audioEl, srcNode, gainNode, loop, route:'main'|'mini', slot:null, ui:{...}}
-  miniSlots: Array(10).fill(null), // {clipId, name}
-  peer: null,
-  connectedPeers: new Set(),
-  code: null,
-  rafId: null
+  clips: [],          // {id, name, size, audioEl, srcNode, gainNode, loop, route:'main'|'mini', slot, ui:{}}
+  miniSlots: Array(10).fill(null),
+  peer: null, connectedPeers: new Set(), code: null, rafId: null
 };
-
-// ======= UI refs =======
 const fileInput = document.getElementById('fileInput');
 const mainGrid = document.getElementById('mainGrid');
 const miniGrid = document.getElementById('miniGrid');
@@ -202,21 +192,12 @@ const stopMiniBtn = document.getElementById('stopMini');
 const makeCodeBtn = document.getElementById('makeCode');
 const shareCodeEl = document.getElementById('shareCode');
 const peerStatus = document.getElementById('peerStatus');
-const saveLSBtn = document.getElementById('saveLS');
-const loadLSBtn = document.getElementById('loadLS');
-const exportBtn = document.getElementById('exportPreset');
-const importInput = document.getElementById('importPreset');
 
-// ======= Utils =======
-function fmtTime(sec){
-  if (!isFinite(sec) || sec<0) return '00:00';
-  const m = Math.floor(sec/60);
-  const s = Math.floor(sec%60);
-  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
+/** ========= 유틸 ========= **/
+function fmtTime(sec){ if (!isFinite(sec)||sec<0) return '00:00'; const m=Math.floor(sec/60), s=Math.floor(sec%60); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
 function mkSmall(t){ const s=document.createElement('span'); s.className='small'; s.textContent=t; return s; }
 
-// ======= 미니 슬롯 렌더/드래그 =======
+/** ========= 미니 슬롯(Render/Drag) ========= **/
 function renderMiniGrid() {
   miniGrid.innerHTML = '';
   const keys = ['1','2','3','4','5','6','7','8','9','0'];
@@ -231,20 +212,16 @@ function renderMiniGrid() {
     const payload = state.miniSlots[i];
     const k = document.createElement('div'); k.className = 'k'; k.textContent = `키 ${keys[i]}`;
     const name = document.createElement('div'); name.className = 'name'; name.textContent = payload?.name || '—';
-    slot.appendChild(k);
-    slot.appendChild(name);
+    slot.appendChild(k); slot.appendChild(name);
 
     if (payload) {
       const handle = document.createElement('button');
-      handle.className = 'btn btn-ghost';
-      handle.textContent = '드래그로 이동';
-      handle.draggable = true;
+      handle.className = 'btn btn-ghost'; handle.textContent = '드래그로 이동'; handle.draggable = true;
       handle.addEventListener('dragstart', (e)=> onSlotDragStart(e, i));
       slot.appendChild(handle);
 
       const unassignBtn = document.createElement('button');
-      unassignBtn.className = 'btn btn-ghost';
-      unassignBtn.textContent = '해제';
+      unassignBtn.className = 'btn btn-ghost'; unassignBtn.textContent = '해제';
       unassignBtn.onclick = () => { state.miniSlots[i] = null; renderMiniGrid(); };
       slot.appendChild(unassignBtn);
     }
@@ -252,404 +229,195 @@ function renderMiniGrid() {
   }
 }
 let draggingSlotIndex = null;
-function onSlotDragStart(e, fromIndex){
-  draggingSlotIndex = fromIndex;
-  e.dataTransfer.setData('text/plain', String(fromIndex));
-  e.dataTransfer.effectAllowed = 'move';
-}
+function onSlotDragStart(e, fromIndex){ draggingSlotIndex = fromIndex; e.dataTransfer.setData('text/plain', String(fromIndex)); e.dataTransfer.effectAllowed = 'move'; }
 function onSlotDrop(e){
   e.preventDefault();
   const toIndex = parseInt(this.dataset.index, 10);
   const fromIndex = draggingSlotIndex ?? parseInt(e.dataTransfer.getData('text/plain'),10);
   this.classList.remove('drag-over');
   if (Number.isNaN(fromIndex) || Number.isNaN(toIndex) || fromIndex === toIndex) return;
-  const fromVal = state.miniSlots[fromIndex];
-  const toVal = state.miniSlots[toIndex];
-  state.miniSlots[toIndex] = fromVal;
-  state.miniSlots[fromIndex] = toVal;
+  const fromVal = state.miniSlots[fromIndex], toVal = state.miniSlots[toIndex];
+  state.miniSlots[toIndex] = fromVal; state.miniSlots[fromIndex] = toVal;
   if (fromVal) { const c = state.clips.find(x=> x.id === fromVal.clipId); if (c) c.slot = toIndex; }
   if (toVal) { const c = state.clips.find(x=> x.id === toVal.clipId); if (c) c.slot = fromIndex; }
-  draggingSlotIndex = null;
-  renderMiniGrid();
+  draggingSlotIndex = null; renderMiniGrid();
 }
 renderMiniGrid();
 
-// ======= 파일 업로드 =======
+/** ========= 파일 업로드 ========= **/
 fileInput.addEventListener('change', async (e) => {
   const files = Array.from(e.target.files || []);
   for (const file of files) {
     const url = URL.createObjectURL(file);
     const audioEl = new Audio(url);
-    audioEl.preload = 'auto';
-    audioEl.crossOrigin = 'anonymous';
-    audioEl.controls = false;
-    audioEl.loop = true; // 기본 반복 ON
+    audioEl.preload = 'auto'; audioEl.crossOrigin = 'anonymous'; audioEl.controls = false; audioEl.loop = true;
 
     const srcNode = audioCtx.createMediaElementSource(audioEl);
-    const gainNode = audioCtx.createGain();
-    gainNode.gain.value = 1.0;
+    const gainNode = audioCtx.createGain(); gainNode.gain.value = 1.0;
     srcNode.connect(gainNode).connect(mainMasterGain);
 
-    const clip = {
-      id: crypto.randomUUID(),
-      file,
-      name: file.name,
-      size: file.size,
-      audioEl,
-      srcNode,
-      gainNode,
-      loop: true,
-      route: 'main',
-      slot: null,
-      ui: {}
-    };
+    const clip = { id: crypto.randomUUID(), name: file.name, size: file.size, audioEl, srcNode, gainNode, loop: true, route:'main', slot:null, ui:{} };
     state.clips.push(clip);
-    addClipCard(clip);
-    hookClipEvents(clip);
+    addClipCard(clip); hookClipEvents(clip);
   }
-  fileInput.value = '';
-  ensureRAF();
+  fileInput.value = ''; ensureRAF();
 });
 
-// ======= 카드 생성 (길이/진행바/재생중 표시 포함) =======
+/** ========= 카드 생성 ========= **/
 function addClipCard(clip){
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.id = `clip-${clip.id}`;
-
-  const head = document.createElement('div');
-  head.className = 'card-head';
-  const title = document.createElement('div'); title.className = 'title'; title.textContent = clip.name;
-  const badge = document.createElement('div'); badge.className = 'badge'; badge.textContent = '메인 출력';
+  const card = document.createElement('div'); card.className='card'; card.id=`clip-${clip.id}`;
+  const head = document.createElement('div'); head.className='card-head';
+  const title = document.createElement('div'); title.className='title'; title.textContent=clip.name;
+  const badge = document.createElement('div'); badge.className='badge'; badge.textContent='메인 출력';
   head.appendChild(title); head.appendChild(badge);
 
-  const body = document.createElement('div'); body.className = 'card-body';
+  const body = document.createElement('div'); body.className='card-body';
 
-  // 0) 시간/진행바
+  // 시간/진행바
   const progWrap = document.createElement('div'); progWrap.className='prog-wrap';
   const progRow = document.createElement('div'); progRow.className='prog-row';
   const curT = document.createElement('span'); curT.className='time'; curT.textContent='00:00';
   const durT = document.createElement('span'); durT.className='time'; durT.textContent='--:--';
   const seek = document.createElement('input'); seek.type='range'; seek.className='seek'; seek.min='0'; seek.max='1'; seek.step='0.001'; seek.value='0';
-  seek.addEventListener('input', ()=> {
-    const d = clip.audioEl.duration || 0;
-    if (d>0) { clip.audioEl.currentTime = parseFloat(seek.value) * d; }
-  });
-  progRow.appendChild(curT); progRow.appendChild(durT);
-  progWrap.appendChild(seek); progWrap.appendChild(progRow);
+  seek.addEventListener('input', ()=> { const d=clip.audioEl.duration||0; if (d>0) clip.audioEl.currentTime = parseFloat(seek.value)*d; });
+  progRow.appendChild(curT); progRow.appendChild(durT); progWrap.appendChild(seek); progWrap.appendChild(progRow);
 
-  // 1) 재생/정지/이어재생 + 삭제  (safePlay 적용)
-  const ctrlRow = document.createElement('div'); ctrlRow.className = 'controls';
+  // 재생/정지/이어재생 + 삭제
+  const ctrlRow = document.createElement('div'); ctrlRow.className='controls';
   const playBtn = document.createElement('button'); playBtn.className='btn btn-blue'; playBtn.textContent='재생';
   const pauseBtn = document.createElement('button'); pauseBtn.className='btn'; pauseBtn.textContent='일시정지';
   const resumeBtn = document.createElement('button'); resumeBtn.className='btn'; resumeBtn.textContent='이어재생';
   const delBtn = document.createElement('button'); delBtn.className='btn btn-danger'; delBtn.textContent='삭제';
-  playBtn.addEventListener('click', async ()=>{
-    routeClip(clip, 'main', badge);
-    clip.audioEl.currentTime = 0;
-    await safePlay(clip.audioEl);
-  });
+  playBtn.addEventListener('click', async ()=>{ routeClip(clip,'main',badge); clip.audioEl.currentTime=0; await safePlay(clip.audioEl); });
   pauseBtn.addEventListener('click', ()=> clip.audioEl.pause());
   resumeBtn.addEventListener('click', async ()=> { await safePlay(clip.audioEl); });
   delBtn.addEventListener('click', ()=> deleteClip(clip));
   ctrlRow.appendChild(playBtn); ctrlRow.appendChild(pauseBtn); ctrlRow.appendChild(resumeBtn); ctrlRow.appendChild(delBtn);
 
-  // 2) 반복 토글
-  const loopRow = document.createElement('div'); loopRow.className = 'controls';
-  const loopBtn = document.createElement('button'); loopBtn.className = 'btn';
+  // 반복 토글
+  const loopRow = document.createElement('div'); loopRow.className='controls';
+  const loopBtn = document.createElement('button'); loopBtn.className='btn';
   const loopLabel = ()=> loopBtn.textContent = '반복: ' + (clip.loop ? 'ON' : 'OFF');
   loopLabel();
-  loopBtn.onclick = ()=>{
-    clip.loop = !clip.loop;
-    clip.audioEl.loop = clip.loop;
-    loopLabel();
-  };
-  loopRow.appendChild(loopBtn);
-  loopRow.appendChild(mkSmall('이 음원을 무한 반복할지 선택 (기본 ON)'));
+  loopBtn.onclick = ()=>{ clip.loop=!clip.loop; clip.audioEl.loop=clip.loop; loopLabel(); };
+  loopRow.appendChild(loopBtn); loopRow.appendChild(mkSmall('이 음원을 무한 반복할지 선택 (기본 ON)'));
 
-  // 3) 개별 볼륨
+  // 개별 볼륨
   const volWrap = document.createElement('div'); volWrap.className='col';
   const volRow = document.createElement('div'); volRow.className='kv';
   const volTag = document.createElement('span'); volTag.className='pill'; volTag.textContent='개별 볼륨';
   const vol = document.createElement('input'); vol.type='range'; vol.min='0'; vol.max='1'; vol.step='0.01'; vol.value='1.0'; vol.className='range';
   const volVal = document.createElement('span'); volVal.className='small'; volVal.textContent='1.00';
-  vol.oninput = ()=> { clip.gainNode.gain.value = parseFloat(vol.value); volVal.textContent = (+vol.value).toFixed(2); };
-  volRow.appendChild(volTag); volRow.appendChild(vol); volRow.appendChild(volVal);
-  volWrap.appendChild(volRow);
+  vol.oninput = ()=> { clip.gainNode.gain.value = parseFloat(vol.value); volVal.textContent=(+vol.value).toFixed(2); };
+  volRow.appendChild(volTag); volRow.appendChild(vol); volRow.appendChild(volVal); volWrap.appendChild(volRow);
 
-  // 4) 미니보드 할당
+  // 미니보드 할당
   const assignRow = document.createElement('div'); assignRow.className='controls';
   const slotSelect = document.createElement('select'); slotSelect.className='btn';
-  const keys = ['1','2','3','4','5','6','7','8','9','0'];
-  keys.forEach((k,idx)=> {
-    const opt = document.createElement('option'); opt.value = idx; opt.textContent = `키 ${k}`;
-    slotSelect.appendChild(opt);
+  ['1','2','3','4','5','6','7','8','9','0'].forEach((k,idx)=> {
+    const opt=document.createElement('option'); opt.value=idx; opt.textContent=`키 ${k}`; slotSelect.appendChild(opt);
   });
   const assignBtn = document.createElement('button'); assignBtn.className='btn'; assignBtn.textContent='미니보드 할당';
-  assignBtn.onclick = ()=>{
-    const idx = parseInt(slotSelect.value,10);
-    state.miniSlots[idx] = { clipId: clip.id, name: clip.name };
-    clip.slot = idx;
-    renderMiniGrid();
-  };
+  assignBtn.onclick = ()=>{ const idx=parseInt(slotSelect.value,10); state.miniSlots[idx]={clipId:clip.id,name:clip.name}; clip.slot=idx; renderMiniGrid(); };
   assignRow.appendChild(slotSelect); assignRow.appendChild(assignBtn);
 
-  body.appendChild(progWrap);
-  body.appendChild(ctrlRow);
-  body.appendChild(loopRow);
-  body.appendChild(volWrap);
-  body.appendChild(assignRow);
-
-  card.appendChild(head);
-  card.appendChild(body);
-  mainGrid.appendChild(card);
+  body.appendChild(progWrap); body.appendChild(ctrlRow); body.appendChild(loopRow); body.appendChild(volWrap); body.appendChild(assignRow);
+  card.appendChild(head); card.appendChild(body); mainGrid.appendChild(card);
 
   clip.ui = { card, badge, curT, durT, seek };
 }
 
-// ======= 클립 이벤트 바인딩 =======
+/** ========= 이벤트/진행 표시 ========= **/
 function hookClipEvents(clip){
   const { audioEl, ui } = clip;
-  audioEl.addEventListener('loadedmetadata', ()=>{
-    ui.durT.textContent = fmtTime(audioEl.duration || 0);
-  });
-  audioEl.addEventListener('play', ()=>{
-    ui.badge.classList.add('playing');
-    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력 · 재생중';
-    updateNowPlaying();
-    ensureRAF();
-  });
-  audioEl.addEventListener('pause', ()=>{
-    ui.badge.classList.remove('playing');
-    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력';
-    updateNowPlaying();
-  });
-  audioEl.addEventListener('ended', ()=>{
-    ui.seek.value = '0'; ui.curT.textContent = '00:00';
-    ui.badge.classList.remove('playing');
-    ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력';
-    updateNowPlaying();
-  });
+  audioEl.addEventListener('loadedmetadata', ()=>{ ui.durT.textContent = fmtTime(audioEl.duration || 0); });
+  audioEl.addEventListener('play', ()=>{ ui.badge.classList.add('playing'); ui.badge.textContent=(clip.route==='mini'?'미니':'메인')+' 출력 · 재생중'; updateNowPlaying(); ensureRAF(); });
+  audioEl.addEventListener('pause', ()=>{ ui.badge.classList.remove('playing'); ui.badge.textContent=(clip.route==='mini'?'미니':'메인')+' 출력'; updateNowPlaying(); });
+  audioEl.addEventListener('ended', ()=>{ ui.seek.value='0'; ui.curT.textContent='00:00'; ui.badge.classList.remove('playing'); ui.badge.textContent=(clip.route==='mini'?'미니':'메인')+' 출력'; updateNowPlaying(); });
 }
 
-// 진행/현재시간 repaint
 function tick(){
-  let anyPlaying = false;
-  for (const c of state.clips) {
-    const a = c.audioEl;
-    if (!a) continue;
+  let any=false;
+  for (const c of state.clips){
+    const a=c.audioEl; if (!a) continue;
     if (!isNaN(a.duration) && a.duration>0){
-      const ratio = Math.min(1, Math.max(0, a.currentTime / a.duration));
-      c.ui.seek.value = String(ratio);
-      c.ui.curT.textContent = fmtTime(a.currentTime);
-      if (a.loop && !isNaN(a.duration)) { c.ui.durT.textContent = fmtTime(a.duration); }
+      const ratio=Math.min(1,Math.max(0,a.currentTime/a.duration));
+      c.ui.seek.value=String(ratio); c.ui.curT.textContent=fmtTime(a.currentTime);
+      if (c.loop && !isNaN(a.duration)) c.ui.durT.textContent=fmtTime(a.duration);
     }
-    if (!a.paused && !a.ended) anyPlaying = true;
+    if (!a.paused && !a.ended) any=true;
   }
-  if (anyPlaying) {
-    state.rafId = requestAnimationFrame(tick);
-  } else {
-    state.rafId = null;
-  }
+  if (any) state.rafId=requestAnimationFrame(tick); else state.rafId=null;
 }
-function ensureRAF(){
-  if (!state.rafId) state.rafId = requestAnimationFrame(tick);
-}
+function ensureRAF(){ if (!state.rafId) state.rafId=requestAnimationFrame(tick); }
 
-// Now Playing
 function updateNowPlaying(){
-  nowPlayingEl.innerHTML = '';
-  const playing = state.clips.filter(c => !c.audioEl.paused && !c.audioEl.ended);
-  if (playing.length === 0){
-    nowPlayingEl.innerHTML = '<div class="small">재생 중인 트랙이 없습니다.</div>';
-    return;
-  }
+  nowPlayingEl.innerHTML='';
+  const playing=state.clips.filter(c=>!c.audioEl.paused && !c.audioEl.ended);
+  if (!playing.length){ nowPlayingEl.innerHTML='<div class="small">재생 중인 트랙이 없습니다.</div>'; return; }
   for (const c of playing){
-    const d = document.createElement('div');
-    d.className = 'np-item';
-    const left = document.createElement('div');
-    left.textContent = c.name;
-    const right = document.createElement('div');
-    right.className = 'small';
-    right.textContent = `${c.route==='mini'?'미니':'메인'} · ${fmtTime(c.audioEl.currentTime)} / ${fmtTime(c.audioEl.duration||0)}`;
-    d.appendChild(left); d.appendChild(right);
-    nowPlayingEl.appendChild(d);
+    const d=document.createElement('div'); d.className='np-item';
+    const left=document.createElement('div'); left.textContent=c.name;
+    const right=document.createElement('div'); right.className='small';
+    right.textContent=`${c.route==='mini'?'미니':'메인'} · ${fmtTime(c.audioEl.currentTime)} / ${fmtTime(c.audioEl.duration||0)}`;
+    d.appendChild(left); d.appendChild(right); nowPlayingEl.appendChild(d);
   }
 }
 
-// 라우팅
+/** ========= 라우팅/삭제/정지/볼륨 ========= **/
 function routeClip(clip, route, badgeEl){
-  if (clip.route === route) { badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중'); return; }
-  try { clip.srcNode.disconnect(); } catch(_) {}
-  if (route === 'main') {
-    clip.srcNode.connect(clip.gainNode).connect(mainMasterGain);
-  } else {
-    clip.srcNode.connect(clip.gainNode).connect(miniMasterGain);
-  }
-  clip.route = route;
-  badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중');
+  if (clip.route===route){ badgeEl.textContent=(route==='mini'?'미니':'메인')+(clip.audioEl.paused?' 출력':' 출력 · 재생중'); return; }
+  try{ clip.srcNode.disconnect(); }catch(_){}
+  if (route==='main') clip.srcNode.connect(clip.gainNode).connect(mainMasterGain);
+  else clip.srcNode.connect(clip.gainNode).connect(miniMasterGain);
+  clip.route=route;
+  badgeEl.textContent=(route==='mini'?'미니':'메인')+(clip.audioEl.paused?' 출력':' 출력 · 재생중');
 }
-
-// 삭제
 function deleteClip(clip){
-  try { clip.audioEl.pause(); } catch(_){}
-  state.miniSlots = state.miniSlots.map(s => s && s.clipId === clip.id ? null : s);
+  try{ clip.audioEl.pause(); }catch(_){}
+  state.miniSlots = state.miniSlots.map(s=> s && s.clipId===clip.id ? null : s);
   renderMiniGrid();
-  try { clip.srcNode.disconnect(); } catch(_){}
-  try { clip.gainNode.disconnect(); } catch(_){}
-  state.clips = state.clips.filter(c => c.id !== clip.id);
-  const card = document.getElementById(`clip-${clip.id}`);
-  if (card && card.parentNode) card.parentNode.removeChild(card);
+  try{ clip.srcNode.disconnect(); }catch(_){}
+  try{ clip.gainNode.disconnect(); }catch(_){}
+  state.clips = state.clips.filter(c=> c.id!==clip.id);
+  const card=document.getElementById(`clip-${clip.id}`); if (card&&card.parentNode) card.parentNode.removeChild(card);
   updateNowPlaying();
 }
+stopMainBtn.onclick = ()=>{ state.clips.filter(c=>c.route==='main').forEach(c=> c.audioEl.pause()); };
+stopMiniBtn.onclick = ()=>{ state.clips.filter(c=>c.route==='mini').forEach(c=> c.audioEl.pause()); };
+masterVol.oninput = ()=>{ mainMasterGain.gain.value=parseFloat(masterVol.value); masterVolVal.textContent=(+masterVol.value).toFixed(2); };
+miniMasterVol.oninput = ()=>{ miniMasterGain.gain.value=parseFloat(miniMasterVol.value); miniMasterVolVal.textContent=(+miniMasterVol.value).toFixed(2); };
 
-// 보드별 전체 정지
-stopMainBtn.onclick = ()=>{
-  state.clips.filter(c=>c.route==='main').forEach(c=> c.audioEl.pause());
-};
-stopMiniBtn.onclick = ()=>{
-  state.clips.filter(c=>c.route==='mini').forEach(c=> c.audioEl.pause());
-};
-
-// 마스터 볼륨
-masterVol.oninput = ()=>{
-  mainMasterGain.gain.value = parseFloat(masterVol.value);
-  masterVolVal.textContent = (+masterVol.value).toFixed(2);
-};
-miniMasterVol.oninput = ()=>{
-  miniMasterGain.gain.value = parseFloat(miniMasterVol.value);
-  miniMasterVolVal.textContent = (+miniMasterVol.value).toFixed(2);
-};
-
-// 단축키 (미니보드 1~0)  — safePlay 적용
+/** ========= 단축키 (미니보드 1~0) ========= **/
 window.addEventListener('keydown', async (e)=>{
-  const map = {'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
+  const map={'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
   if (!(e.key in map)) return;
-  const idx = map[e.key];
-  const slot = state.miniSlots[idx];
-  if (!slot) return;
-  const clip = state.clips.find(c=> c.id === slot.clipId);
-  if (!clip) return;
-
-  const badgeEl = clip.ui?.badge || {textContent:''};
-  routeClip(clip, 'mini', badgeEl);
-
-  clip.audioEl.loop = clip.loop;
-  clip.audioEl.currentTime = 0;
-  await safePlay(clip.audioEl);
+  const idx=map[e.key], slot=state.miniSlots[idx]; if (!slot) return;
+  const clip=state.clips.find(c=> c.id===slot.clipId); if (!clip) return;
+  const badgeEl=clip.ui?.badge || {textContent:''};
+  routeClip(clip,'mini',badgeEl);
+  clip.audioEl.loop=clip.loop; clip.audioEl.currentTime=0; await safePlay(clip.audioEl);
 });
 
-// 프리셋 직렬화/적용
-function serializePreset(){
-  return {
-    version: 2,
-    mainMaster: mainMasterGain.gain.value,
-    miniMaster: miniMasterGain.gain.value,
-    clips: state.clips.map(c=> ({
-      name: c.name,
-      size: c.size ?? null,
-      loop: !!c.loop,
-      volume: c.gainNode.gain.value,
-      route: c.route
-    })),
-    miniSlots: state.miniSlots.map(s => s ? { name: s.name } : null)
-  };
-}
-function applyPreset(preset){
-  if (!preset || !preset.clips) return;
-  if (typeof preset.mainMaster === 'number') { mainMasterGain.gain.value = preset.mainMaster; masterVol.value = preset.mainMaster; masterVolVal.textContent = preset.mainMaster.toFixed(2); }
-  if (typeof preset.miniMaster === 'number') { miniMasterGain.gain.value = preset.miniMaster; miniMasterVol.value = preset.miniMaster; miniMasterVolVal.textContent = preset.miniMaster.toFixed(2); }
-  preset.clips.forEach(pc => {
-    const match = state.clips.find(c => (pc.size!=null && c.size===pc.size && c.name===pc.name) || (pc.size==null && c.name===pc.name));
-    if (!match) return;
-    match.loop = !!pc.loop;
-    match.audioEl.loop = match.loop;
-    if (typeof pc.volume === 'number') { match.gainNode.gain.value = pc.volume; }
-    if (pc.route === 'mini' || pc.route === 'main') {
-      const badgeEl = match.ui?.badge || {textContent:''};
-      routeClip(match, pc.route, badgeEl);
-    }
-  });
-  state.miniSlots = preset.miniSlots.map((s)=>{
-    if (!s) return null;
-    const clip = state.clips.find(c=> c.name === s.name);
-    return clip ? { clipId: clip.id, name: clip.name } : null;
-  });
-  state.clips.forEach(c=> c.slot=null);
-  state.miniSlots.forEach((s,idx)=> { if (s){ const c=state.clips.find(x=>x.id===s.clipId); if(c) c.slot=idx; } });
-  renderMiniGrid();
-}
-const LS_KEY = 'soundboard_preset_v2';
-document.getElementById('saveLS').onclick = ()=>{
-  localStorage.setItem(LS_KEY, JSON.stringify(serializePreset()));
-  alert('로컬에 저장되었습니다.');
-};
-document.getElementById('loadLS').onclick = ()=>{
-  const raw = localStorage.getItem(LS_KEY);
-  if (!raw) { alert('저장된 프리셋이 없습니다.'); return; }
-  try { applyPreset(JSON.parse(raw)); } catch(e){ alert('프리셋 적용 중 오류: '+e.message); }
-};
-document.getElementById('exportPreset').onclick = ()=>{
-  const blob = new Blob([JSON.stringify(serializePreset(),null,2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'soundboard_preset.json';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-};
-document.getElementById('importPreset').addEventListener('change', async (e)=>{
-  const file = e.target.files?.[0];
-  if (!file) return;
-  try {
-    const text = await file.text();
-    applyPreset(JSON.parse(text));
-  } catch (err) {
-    alert('프리셋 파일을 읽는 중 오류: ' + err.message);
-  } finally {
-    e.target.value = '';
-  }
-});
-
-// PeerJS (기존과 동일)
-function genCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i=0;i<6;i++) s += alphabet[Math.floor(Math.random()*alphabet.length)];
-  return s;
-}
+/** ========= PeerJS 공유 ========= **/
+function genCode(){ const alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s=""; for(let i=0;i<6;i++) s+=alphabet[Math.floor(Math.random()*alphabet.length)]; return s; }
 makeCodeBtn.onclick = ()=>{
-  if (state.peer) { alert("이미 코드가 생성되었습니다: " + state.code); return; }
-  const code = genCode();
-  const peer = new Peer(code, { debug: 1 });
-  state.peer = peer;
-  state.code = code;
-  shareCodeEl.textContent = code;
-  peerStatus.textContent = "신호 서버 연결 중…";
-
-  peer.on('open', (id)=>{
-    peerStatus.textContent = `준비됨: 코드 ${id} (청취자 접속 시 오디오 전송)`;
-  });
+  if (state.peer){ alert("이미 코드가 생성되었습니다: " + state.code); return; }
+  const code=genCode(); const peer=new Peer(code,{ debug:1 });
+  state.peer=peer; state.code=code; shareCodeEl.textContent=code; peerStatus.textContent="신호 서버 연결 중…";
+  peer.on('open', (id)=>{ peerStatus.textContent=`준비됨: 코드 ${id} (청취자 접속 시 오디오 전송)`; });
   peer.on('connection', (conn)=>{
     state.connectedPeers.add(conn.peer);
     conn.on('open', ()=>{
-      const stream = shareDest.stream;
+      const stream=shareDest.stream;
       state.peer.call(conn.peer, stream, {metadata:{kind:'mixaudio'}});
-      conn.send({type:'hello', now: Date.now(), code: state.code});
-      peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
+      conn.send({type:'hello', now:Date.now(), code:state.code});
+      peerStatus.textContent=`연결 ${state.connectedPeers.size}명`;
     });
-    conn.on('close', ()=>{
-      state.connectedPeers.delete(conn.peer);
-      peerStatus.textContent = `연결 ${state.connectedPeers.size}명`;
-    });
+    conn.on('close', ()=>{ state.connectedPeers.delete(conn.peer); peerStatus.textContent=`연결 ${state.connectedPeers.size}명`; });
   });
-  peer.on('error', (err)=>{
-    console.error(err);
-    peerStatus.textContent = '오류: ' + err.message;
-    alert("Peer 오류: " + err.message + "\n(다시 시도하거나 다른 코드로 생성해보세요)");
-  });
-  peer.on('disconnected', ()=>{
-    peerStatus.textContent = '신호 서버와 연결 끊김(자동 재시도 중)';
-    peer.reconnect();
-  });
+  peer.on('error', (err)=>{ console.error(err); peerStatus.textContent='오류: '+err.message; alert("Peer 오류: "+err.message); });
+  peer.on('disconnected', ()=>{ peerStatus.textContent='신호 서버와 연결 끊김(자동 재시도 중)'; peer.reconnect(); });
 };
 </script>
 </body>
