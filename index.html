@@ -53,12 +53,10 @@
   input[type="file"]{color:#9fb0c9}
   .section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
   .pill-blue{background:#0b1730;border:1px solid #1a3b70}
-  /* progress bar */
   .prog-wrap{display:flex;flex-direction:column;gap:6px}
   .prog-row{display:flex;justify-content:space-between;align-items:center}
   .time{font-size:12px;color:#c9d6f5}
   input[type="range"].seek{width:100%}
-  /* Now Playing list */
   .np-item{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:10px;background:#0f1624}
 </style>
 </head>
@@ -69,6 +67,7 @@
     <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 미니보드 드래그 · 프리셋 · 공유</span>
   </div>
   <div class="row">
+    <button id="unlockAudio" class="btn">🔊 소리 켜기</button>
     <label class="btn">
       파일 업로드
       <input id="fileInput" type="file" accept="audio/*" multiple style="display:none" />
@@ -150,23 +149,44 @@
 <!-- PeerJS -->
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-/** ========= 오디오 그래프 ========= **/
+/** ========= 오디오 컨텍스트 & 언락 유틸 ========= **/
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-// 그룹별 마스터
+// 오디오 언락 버튼
+const unlockBtn = document.getElementById('unlockAudio');
+const ensureUnlocked = async () => {
+  try { await audioCtx.resume(); } catch(e){}
+  unlockBtn.textContent = '🔊 준비 완료';
+  unlockBtn.disabled = true;
+};
+unlockBtn.addEventListener('click', ensureUnlocked, { once:true });
+
+// 안전 재생 래퍼: 언락 보장 + 에러 안내
+async function safePlay(audioEl){
+  if (audioCtx.state !== 'running') {
+    try { await audioCtx.resume(); } catch(e){}
+  }
+  try {
+    await audioEl.play();
+  } catch (err) {
+    console.warn('play() 실패:', err);
+    alert('브라우저 오디오 자동재생 정책으로 차단됐습니다. 상단의 "소리 켜기" 버튼을 먼저 눌러주세요.');
+    throw err;
+  }
+}
+
+/** ========= 오디오 그래프 ========= **/
 const mainMasterGain = audioCtx.createGain();
 const miniMasterGain = audioCtx.createGain();
 mainMasterGain.gain.value = 0.9;
 miniMasterGain.gain.value = 0.9;
 
-// 최종 마스터(메인+미니 합) → 로컬 스피커 & 공유 스트림
 const overallMaster = audioCtx.createGain();
 overallMaster.gain.value = 1.0;
 mainMasterGain.connect(overallMaster);
 miniMasterGain.connect(overallMaster);
 overallMaster.connect(audioCtx.destination);
 
-// 공유용 합성 스트림
 const shareDest = audioCtx.createMediaStreamDestination();
 overallMaster.connect(shareDest);
 
@@ -293,7 +313,7 @@ fileInput.addEventListener('change', async (e) => {
       loop: true,
       route: 'main',
       slot: null,
-      ui: {} // 나중에 채움
+      ui: {}
     };
     state.clips.push(clip);
     addClipCard(clip);
@@ -330,19 +350,20 @@ function addClipCard(clip){
   progRow.appendChild(curT); progRow.appendChild(durT);
   progWrap.appendChild(seek); progWrap.appendChild(progRow);
 
-  // 1) 재생/정지/이어재생 + 삭제
+  // 1) 재생/정지/이어재생 + 삭제  (safePlay 적용)
   const ctrlRow = document.createElement('div'); ctrlRow.className = 'controls';
   const playBtn = document.createElement('button'); playBtn.className='btn btn-blue'; playBtn.textContent='재생';
   const pauseBtn = document.createElement('button'); pauseBtn.className='btn'; pauseBtn.textContent='일시정지';
   const resumeBtn = document.createElement('button'); resumeBtn.className='btn'; resumeBtn.textContent='이어재생';
   const delBtn = document.createElement('button'); delBtn.className='btn btn-danger'; delBtn.textContent='삭제';
-  playBtn.onclick = ()=>{
+  playBtn.addEventListener('click', async ()=>{
     routeClip(clip, 'main', badge);
-    clip.audioEl.currentTime = 0; clip.audioEl.play();
-  };
-  pauseBtn.onclick = ()=> clip.audioEl.pause();
-  resumeBtn.onclick = ()=> clip.audioEl.play();
-  delBtn.onclick = ()=> deleteClip(clip);
+    clip.audioEl.currentTime = 0;
+    await safePlay(clip.audioEl);
+  });
+  pauseBtn.addEventListener('click', ()=> clip.audioEl.pause());
+  resumeBtn.addEventListener('click', async ()=> { await safePlay(clip.audioEl); });
+  delBtn.addEventListener('click', ()=> deleteClip(clip));
   ctrlRow.appendChild(playBtn); ctrlRow.appendChild(pauseBtn); ctrlRow.appendChild(resumeBtn); ctrlRow.appendChild(delBtn);
 
   // 2) 반복 토글
@@ -395,11 +416,10 @@ function addClipCard(clip){
   card.appendChild(body);
   mainGrid.appendChild(card);
 
-  // UI 핸들 저장
   clip.ui = { card, badge, curT, durT, seek };
 }
 
-// ======= 클립 이벤트 바인딩(길이/진행/상태 업데이트) =======
+// ======= 클립 이벤트 바인딩 =======
 function hookClipEvents(clip){
   const { audioEl, ui } = clip;
   audioEl.addEventListener('loadedmetadata', ()=>{
@@ -417,7 +437,6 @@ function hookClipEvents(clip){
     updateNowPlaying();
   });
   audioEl.addEventListener('ended', ()=>{
-    // loop=false 인 경우에만 ended 발생
     ui.seek.value = '0'; ui.curT.textContent = '00:00';
     ui.badge.classList.remove('playing');
     ui.badge.textContent = (clip.route==='mini'?'미니':'메인') + ' 출력';
@@ -425,7 +444,7 @@ function hookClipEvents(clip){
   });
 }
 
-// 진행/현재시간 repaint (requestAnimationFrame)
+// 진행/현재시간 repaint
 function tick(){
   let anyPlaying = false;
   for (const c of state.clips) {
@@ -449,7 +468,7 @@ function ensureRAF(){
   if (!state.rafId) state.rafId = requestAnimationFrame(tick);
 }
 
-// ======= Now Playing 목록 =======
+// Now Playing
 function updateNowPlaying(){
   nowPlayingEl.innerHTML = '';
   const playing = state.clips.filter(c => !c.audioEl.paused && !c.audioEl.ended);
@@ -470,7 +489,7 @@ function updateNowPlaying(){
   }
 }
 
-// ======= 라우팅 =======
+// 라우팅
 function routeClip(clip, route, badgeEl){
   if (clip.route === route) { badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중'); return; }
   try { clip.srcNode.disconnect(); } catch(_) {}
@@ -483,7 +502,7 @@ function routeClip(clip, route, badgeEl){
   badgeEl.textContent = (route==='mini'?'미니':'메인') + (clip.audioEl.paused?' 출력':' 출력 · 재생중');
 }
 
-// ======= 삭제 =======
+// 삭제
 function deleteClip(clip){
   try { clip.audioEl.pause(); } catch(_){}
   state.miniSlots = state.miniSlots.map(s => s && s.clipId === clip.id ? null : s);
@@ -496,7 +515,7 @@ function deleteClip(clip){
   updateNowPlaying();
 }
 
-// ======= 보드별 전체 정지 =======
+// 보드별 전체 정지
 stopMainBtn.onclick = ()=>{
   state.clips.filter(c=>c.route==='main').forEach(c=> c.audioEl.pause());
 };
@@ -504,7 +523,7 @@ stopMiniBtn.onclick = ()=>{
   state.clips.filter(c=>c.route==='mini').forEach(c=> c.audioEl.pause());
 };
 
-// ======= 마스터 볼륨 =======
+// 마스터 볼륨
 masterVol.oninput = ()=>{
   mainMasterGain.gain.value = parseFloat(masterVol.value);
   masterVolVal.textContent = (+masterVol.value).toFixed(2);
@@ -514,8 +533,8 @@ miniMasterVol.oninput = ()=>{
   miniMasterVolVal.textContent = (+miniMasterVol.value).toFixed(2);
 };
 
-// ======= 단축키 (미니보드 1~0) =======
-window.addEventListener('keydown', (e)=>{
+// 단축키 (미니보드 1~0)  — safePlay 적용
+window.addEventListener('keydown', async (e)=>{
   const map = {'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
   if (!(e.key in map)) return;
   const idx = map[e.key];
@@ -529,10 +548,10 @@ window.addEventListener('keydown', (e)=>{
 
   clip.audioEl.loop = clip.loop;
   clip.audioEl.currentTime = 0;
-  clip.audioEl.play();
+  await safePlay(clip.audioEl);
 });
 
-// ======= 프리셋 직렬화/적용 =======
+// 프리셋 직렬화/적용
 function serializePreset(){
   return {
     version: 2,
@@ -602,7 +621,7 @@ document.getElementById('importPreset').addEventListener('change', async (e)=>{
   }
 });
 
-// ======= 공유 코드 (PeerJS) =======
+// PeerJS (기존과 동일)
 function genCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
