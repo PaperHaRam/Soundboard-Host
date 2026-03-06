@@ -536,7 +536,7 @@ async function addAudioFile(file, pendingConfig = null) {
 
     // 리버브용
     const convolver = audioCtx.createConvolver();
-    convolver.buffer = createImpulseResponse(audioCtx, 2.0, 2.0);
+    convolver.buffer = createImpulseResponse(audioCtx, 3.5, 2.5);
 
     const wetGain = audioCtx.createGain();
     wetGain.gain.value = pendingConfig?.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
