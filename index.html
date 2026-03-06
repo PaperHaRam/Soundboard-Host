@@ -539,7 +539,10 @@ async function addAudioFile(file, pendingConfig = null) {
     convolver.buffer = createImpulseResponse(audioCtx, 4.0, 2.5);
 
     const wetGain = audioCtx.createGain();
-    wetGain.gain.value = pendingConfig?.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+    const initialReverbMix = pendingConfig?.reverbMix ?? DEFAULT_REVERB_MIX;
+    wetGain.gain.value = pendingConfig?.reverbEnabled
+      ? initialReverbMix
+      : 0;
 
     // 가장 안전한 기본 체인
     // src -> gain -> fade -> output -> main
@@ -577,6 +580,7 @@ async function addAudioFile(file, pendingConfig = null) {
       fadeEnabled: pendingConfig?.fadeEnabled ?? DEFAULT_FADE_ENABLED,
       fadeDuration: pendingConfig?.fadeDuration ?? DEFAULT_FADE_DURATION,
       reverbEnabled: pendingConfig?.reverbEnabled ?? DEFAULT_REVERB_ENABLED,
+      reverbMix: pendingConfig?.reverbMix ?? DEFAULT_REVERB_MIX,
       route: 'main',
       slot: null,
       ui: {},
@@ -779,6 +783,39 @@ function addClipCard(clip){
   const fadeRow = document.createElement('div');
   fadeRow.className = 'controls';
 
+    const fadeSliderWrap = document.createElement('div');
+  fadeSliderWrap.className = 'col';
+
+  const fadeSliderRow = document.createElement('div');
+  fadeSliderRow.className = 'kv';
+
+  const fadeTag = document.createElement('span');
+  fadeTag.className = 'pill';
+  fadeTag.textContent = '페이드 시간';
+
+  const fadeSlider = document.createElement('input');
+  fadeSlider.type = 'range';
+  fadeSlider.min = '0';
+  fadeSlider.max = '5';
+  fadeSlider.step = '0.1';
+  fadeSlider.value = String(clip.fadeDuration);
+  fadeSlider.className = 'range';
+
+  const fadeSliderVal = document.createElement('span');
+  fadeSliderVal.className = 'small';
+  fadeSliderVal.textContent = `${Number(clip.fadeDuration).toFixed(1)}초`;
+
+  fadeSlider.oninput = () => {
+    clip.fadeDuration = parseFloat(fadeSlider.value);
+    fadeSliderVal.textContent = `${clip.fadeDuration.toFixed(1)}초`;
+    fadeHint.textContent = `재생/정지 시 약 ${clip.fadeDuration.toFixed(1)}초 페이드가 적용됩니다.`;
+  };
+
+  fadeSliderRow.appendChild(fadeTag);
+  fadeSliderRow.appendChild(fadeSlider);
+  fadeSliderRow.appendChild(fadeSliderVal);
+  fadeSliderWrap.appendChild(fadeSliderRow);
+
   const fadeBtn = document.createElement('button');
   fadeBtn.className = 'btn';
 
@@ -793,12 +830,45 @@ function addClipCard(clip){
   };
 
   fadeRow.appendChild(fadeBtn);
-  fadeRow.appendChild(
-    mkSmall(`재생/정지 시 약 ${clip.fadeDuration}초 페이드가 적용됩니다.`)
-  );
+  const fadeHint = mkSmall(`재생/정지 시 약 ${Number(clip.fadeDuration).toFixed(1)}초 페이드가 적용됩니다.`);
+  fadeRow.appendChild(fadeHint);
 
   const reverbRow = document.createElement('div');
   reverbRow.className = 'controls';
+
+    const reverbSliderWrap = document.createElement('div');
+  reverbSliderWrap.className = 'col';
+
+  const reverbSliderRow = document.createElement('div');
+  reverbSliderRow.className = 'kv';
+
+  const reverbTag = document.createElement('span');
+  reverbTag.className = 'pill';
+  reverbTag.textContent = '리버브 강도';
+
+  const reverbSlider = document.createElement('input');
+  reverbSlider.type = 'range';
+  reverbSlider.min = '0';
+  reverbSlider.max = '1';
+  reverbSlider.step = '0.01';
+  reverbSlider.value = String(clip.reverbMix ?? DEFAULT_REVERB_MIX);
+  reverbSlider.className = 'range';
+
+  const reverbSliderVal = document.createElement('span');
+  reverbSliderVal.className = 'small';
+  reverbSliderVal.textContent = Number(clip.reverbMix ?? DEFAULT_REVERB_MIX).toFixed(2);
+
+  reverbSlider.oninput = () => {
+    clip.reverbMix = parseFloat(reverbSlider.value);
+    reverbSliderVal.textContent = clip.reverbMix.toFixed(2);
+    clip.wetGain.gain.value = clip.reverbEnabled ? clip.reverbMix : 0;
+    reverbHint.textContent = `잔향 효과를 켜거나 끕니다. 현재 강도 ${clip.reverbMix.toFixed(2)}`;
+  };
+
+  reverbSliderRow.appendChild(reverbTag);
+  reverbSliderRow.appendChild(reverbSlider);
+  reverbSliderRow.appendChild(reverbSliderVal);
+  reverbSliderWrap.appendChild(reverbSliderRow);
 
   const reverbBtn = document.createElement('button');
   reverbBtn.className = 'btn';
@@ -810,14 +880,13 @@ function addClipCard(clip){
 
   reverbBtn.onclick = () => {
     clip.reverbEnabled = !clip.reverbEnabled;
-    clip.wetGain.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+    clip.wetGain.gain.value = clip.reverbEnabled ? clip.reverbMix : 0;
     updateReverbBtn();
   };
 
   reverbRow.appendChild(reverbBtn);
-  reverbRow.appendChild(
-    mkSmall('잔향 효과를 켜거나 끕니다.')
-  );
+  const reverbHint = mkSmall(`잔향 효과를 켜거나 끕니다. 현재 강도 ${Number(clip.reverbMix ?? DEFAULT_REVERB_MIX).toFixed(2)}`);
+  reverbRow.appendChild(reverbHint);
 
   const volWrap = document.createElement('div');
   volWrap.className='col';
@@ -887,7 +956,9 @@ function addClipCard(clip){
   body.appendChild(ctrlRow);
   body.appendChild(loopRow);
   body.appendChild(fadeRow);
+  body.appendChild(fadeSliderWrap);
   body.appendChild(reverbRow);
+  body.appendChild(reverbSliderWrap);
   body.appendChild(volWrap);
   body.appendChild(assignRow);
   card.appendChild(head);
@@ -895,8 +966,12 @@ function addClipCard(clip){
   mainGrid.appendChild(card);
 
   clip.ui = {
-    card, badge, curT, durT, seek, vol, volVal,
-    loopBtn, fadeBtn, reverbBtn, slotSelect
+    card, badge, curT, durT, seek,
+    vol, volVal,
+    loopBtn, fadeBtn, reverbBtn,
+    fadeSlider, fadeSliderVal,
+    reverbSlider, reverbSliderVal,
+    slotSelect
   };
 }
 
@@ -1033,19 +1108,31 @@ function applyClipConfig(clip, cfg){
   clip.fadeEnabled = cfg.fadeEnabled ?? DEFAULT_FADE_ENABLED;
   clip.fadeDuration = cfg.fadeDuration ?? DEFAULT_FADE_DURATION;
   clip.reverbEnabled = cfg.reverbEnabled ?? DEFAULT_REVERB_ENABLED;
+  clip.reverbMix = cfg.reverbMix ?? DEFAULT_REVERB_MIX;
 
   clip.gainNode.gain.value = cfg.volume ?? 1.0;
   clip.ui.vol.value = String(clip.gainNode.gain.value);
   clip.ui.volVal.textContent = (+clip.gainNode.gain.value).toFixed(2);
 
-  clip.wetGain.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+  clip.wetGain.gain.value = clip.reverbEnabled ? clip.reverbMix : 0;
 
   clip.ui.loopBtn.textContent = '반복: ' + (clip.loop ? 'ON' : 'OFF');
+
   if (clip.ui.fadeBtn) {
     clip.ui.fadeBtn.textContent = '페이드 인/아웃: ' + (clip.fadeEnabled ? 'ON' : 'OFF');
   }
   if (clip.ui.reverbBtn) {
     clip.ui.reverbBtn.textContent = '리버브: ' + (clip.reverbEnabled ? 'ON' : 'OFF');
+  }
+
+  if (clip.ui.fadeSlider) {
+    clip.ui.fadeSlider.value = String(clip.fadeDuration);
+    clip.ui.fadeSliderVal.textContent = `${clip.fadeDuration.toFixed(1)}초`;
+  }
+
+  if (clip.ui.reverbSlider) {
+    clip.ui.reverbSlider.value = String(clip.reverbMix);
+    clip.ui.reverbSliderVal.textContent = clip.reverbMix.toFixed(2);
   }
 
   const route = cfg.route === 'mini' ? 'mini' : 'main';
@@ -1162,6 +1249,7 @@ function buildExportConfig(){
       fadeEnabled: c.fadeEnabled,
       fadeDuration: c.fadeDuration,
       reverbEnabled: c.reverbEnabled,
+      reverbMix: c.reverbMix,
       route: c.route,
       slot: c.slot
     }))
