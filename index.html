@@ -158,6 +158,10 @@
     <div class="divider"></div>
     <h2 style="margin:0 0 8px 0;font-size:15px">복원 상태</h2>
     <div id="restoreStatus" class="small">대기 중</div>
+    <div style="margin-top:10px">
+      <h2 style="margin:0 0 8px 0;font-size:15px">복원 필요 파일</h2>
+      <div id="restoreFileList" class="small">아직 불러온 설정 없음</div>
+    </div>
   </aside>
 </main>
 
@@ -236,6 +240,7 @@ const mainGrid = document.getElementById('mainGrid');
 const miniGrid = document.getElementById('miniGrid');
 const nowPlayingEl = document.getElementById('nowPlaying');
 const restoreStatus = document.getElementById('restoreStatus');
+const restoreFileList = document.getElementById('restoreFileList');
 
 const masterVol = document.getElementById('masterVol');
 const masterVolVal = document.getElementById('masterVolVal');
@@ -265,6 +270,50 @@ function mkSmall(t){
   s.className = 'small';
   s.textContent = t;
   return s;
+}
+function renderRestoreFileList(clips = [], matchedKeys = new Set()) {
+  if (!clips.length) {
+    restoreFileList.innerHTML = '아직 불러온 설정 없음';
+    return;
+  }
+
+  const rows = clips.map((clip, idx) => {
+    const key = makeFileKey({
+      name: clip.name,
+      size: clip.size,
+      lastModified: clip.lastModified
+    });
+
+    const matched = matchedKeys.has(key);
+    const statusText = matched ? '매칭 완료' : '파일 필요';
+    const statusColor = matched ? '#6ee7b7' : '#fca5a5';
+
+    return `
+      <div style="padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0f1624;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <div style="min-width:0;">
+            <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${idx + 1}. ${escapeHtml(clip.name)}
+            </div>
+            <div class="small">
+              size: ${clip.size} / lastModified: ${clip.lastModified}
+            </div>
+          </div>
+          <div class="small" style="color:${statusColor};white-space:nowrap;">${statusText}</div>
+        </div>
+      </div>
+    `;
+  });
+
+  restoreFileList.innerHTML = rows.join('');
+}
+function escapeHtml(str = '') {
+  return String(str)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 function makeFileKey({name, size, lastModified}){
   return `${name}__${size}__${lastModified}`;
@@ -444,6 +493,7 @@ restoreAudioInput.addEventListener('change', async (e) => {
 
   const expectedClips = state.pendingImportConfig.clips || [];
   const fileMap = new Map();
+  const matchedKeys = new Set();
 
   for (const file of files) {
     const key = makeFileKey({
@@ -470,6 +520,7 @@ restoreAudioInput.addEventListener('change', async (e) => {
     if (file) {
       await addAudioFile(file, clipCfg);
       matched.push(clipCfg.name);
+      matchedKeys.add(key);
     } else {
       missing.push(clipCfg.name);
     }
@@ -480,6 +531,8 @@ restoreAudioInput.addEventListener('change', async (e) => {
   } else {
     restoreStatus.innerHTML = `부분 복원: ${matched.length}개 매칭 / ${missing.length}개 누락<br>누락: ${missing.join(', ')}`;
   }
+
+  renderRestoreFileList(expectedClips, matchedKeys);
 
   state.pendingImportConfig = null;
   restoreAudioInput.value = '';
@@ -940,6 +993,7 @@ importInput.addEventListener('change', async (e)=>{
     }
 
     state.pendingImportConfig = parsed;
+    renderRestoreFileList(parsed.clips);
 
     if (typeof parsed.stopHotkey === 'string') {
       state.stopHotkey = parsed.stopHotkey;
