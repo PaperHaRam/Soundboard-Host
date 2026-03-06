@@ -65,7 +65,7 @@
 <header>
   <div class="row">
     <h1>사운드보드 (호스트)</h1>
-    <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 미니보드 드래그 · 삭제 · 공유</span>
+    <span class="sub">길이/진행바/재생중 표시 · 개별/보드 마스터 · 반복 · 페이드 · 리버브 · 미니보드 드래그 · 삭제 · 공유</span>
   </div>
   <div class="row">
     <button id="unlockAudio" class="btn">🔊 소리 켜기</button>
@@ -90,7 +90,6 @@
 </header>
 
 <main>
-  <!-- 메인 보드 -->
   <section class="panel">
     <div class="section-head">
       <h2>메인 사운드보드</h2>
@@ -127,7 +126,6 @@
     <div id="mainGrid" class="grid"></div>
   </section>
 
-  <!-- 오른쪽: 미니 보드 + Now Playing -->
   <aside class="panel">
     <div class="section-head">
       <h2>미니 사운드보드</h2>
@@ -165,7 +163,6 @@
   </aside>
 </main>
 
-<!-- 좌하단: 공유 코드 생성기 -->
 <div class="foot">
   <button id="makeCode" class="btn btn-accent">공유 코드 생성</button>
   <div class="codebox">
@@ -175,7 +172,6 @@
   <span id="peerStatus" class="small">대기 중…</span>
 </div>
 
-<!-- PeerJS -->
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 /** ========= 오디오 컨텍스트 & 언락 ========= **/
@@ -203,24 +199,9 @@ async function safePlay(audioEl){
 
 /** ========= 수정용 상수 ========= **/
 const DEFAULT_FADE_ENABLED = true;
+const DEFAULT_FADE_DURATION = 2.0; // ★ 여기 숫자만 바꾸면 페이드 시간 변경
 const DEFAULT_REVERB_ENABLED = false;
-
-/*
-  ★ 여기 숫자를 바꾸면 페이드 시간(초)이 바뀝니다.
-  예:
-  2.0  -> 2초
-  1.5  -> 1.5초
-  3.0  -> 3초
-*/
-const DEFAULT_FADE_DURATION = 2.0;
-
-/*
-  리버브 강도 관련 기본값
-  필요하면 여기 값도 조절 가능
-*/
-const REVERB_SECONDS = 2.2;   // 임펄스 길이
-const REVERB_DECAY = 2.0;     // 감쇠
-const REVERB_MIX = 0.22;      // 0~1, 높을수록 더 젖은 소리
+const DEFAULT_REVERB_MIX = 0.18;
 
 /** ========= 오디오 그래프 ========= **/
 const mainMasterGain = audioCtx.createGain();
@@ -237,45 +218,12 @@ overallMaster.connect(audioCtx.destination);
 const shareDest = audioCtx.createMediaStreamDestination();
 overallMaster.connect(shareDest);
 
-function createImpulseResponse(ctx, seconds = REVERB_SECONDS, decay = REVERB_DECAY) {
-  const sampleRate = ctx.sampleRate;
-  const length = Math.max(1, Math.floor(sampleRate * seconds));
-  const impulse = ctx.createBuffer(2, length, sampleRate);
-
-  for (let ch = 0; ch < impulse.numberOfChannels; ch++) {
-    const channelData = impulse.getChannelData(ch);
-    for (let i = 0; i < length; i++) {
-      const n = length - i;
-      channelData[i] = (Math.random() * 2 - 1) * Math.pow(n / length, decay);
-    }
-  }
-  return impulse;
-}
-
-const sharedConvolver = audioCtx.createConvolver();
-sharedConvolver.buffer = createImpulseResponse(audioCtx);
-
-function applyOutputRouting(clip) {
-  try { clip.dryGain.disconnect(); } catch(_) {}
-  try { clip.wetGain.disconnect(); } catch(_) {}
-
-  const targetMaster = clip.route === 'mini' ? miniMasterGain : mainMasterGain;
-
-  clip.dryGain.connect(targetMaster);
-
-  if (clip.reverbEnabled) {
-    clip.wetGain.gain.value = REVERB_MIX;
-    clip.wetGain.connect(sharedConvolver);
-    sharedConvolver.connect(targetMaster);
-  }
-}
-
 /** ========= 상태 & UI ========= **/
 const STORAGE_KEY = 'soundboard_host_config_v1';
 const DEFAULT_STOP_HOTKEY = 'F8';
 
 const state = {
-  clips: [], // {id, fileKey, fileMeta, name, size, lastModified, audioEl, srcNode, gainNode, loop, route, slot, ui, pendingConfig}
+  clips: [],
   miniSlots: Array(10).fill(null),
   peer: null,
   connectedPeers: new Set(),
@@ -402,75 +350,92 @@ function loadLocalConfig(){
 function renderHotkey(){
   stopHotkeyView.textContent = state.stopHotkey || DEFAULT_STOP_HOTKEY;
 }
-function stopAllAudio(){
-  state.clips.forEach(c => pauseClipWithFade(c));
-  updateNowPlaying();
+
+/** ========= 리버브 ========= **/
+function createImpulseResponse(ctx, seconds = 2.0, decay = 2.0) {
+  const rate = ctx.sampleRate;
+  const length = Math.max(1, Math.floor(rate * seconds));
+  const impulse = ctx.createBuffer(2, length, rate);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return impulse;
 }
-function cancelFadeAutomation(clip) {
+
+/** ========= 페이드 유틸 ========= **/
+function clearClipFadeTimer(clip) {
+  if (clip.fadeTimer) {
+    clearTimeout(clip.fadeTimer);
+    clip.fadeTimer = null;
+  }
+}
+function setFadeNow(clip, value) {
   const now = audioCtx.currentTime;
-  try {
-    clip.fadeGainNode.gain.cancelScheduledValues(now);
-    clip.fadeGainNode.gain.setValueAtTime(clip.fadeGainNode.gain.value, now);
-  } catch (_) {}
+  clip.fadeNode.gain.cancelScheduledValues(now);
+  clip.fadeNode.gain.setValueAtTime(value, now);
 }
-
-async function playClipWithFade(clip, route = clip.route) {
+async function playWithFade(clip, route = clip.route) {
   routeClip(clip, route, clip.ui.badge);
+  clearClipFadeTimer(clip);
 
-  const fadeSec = Math.max(0, Number(clip.fadeDuration || 0));
+  const sec = Number(clip.fadeDuration || 0);
 
-  cancelFadeAutomation(clip);
-
-  if (clip.fadeEnabled && fadeSec > 0) {
-    clip.fadeGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+  if (clip.fadeEnabled && sec > 0) {
+    setFadeNow(clip, 0);
     clip.audioEl.currentTime = 0;
     await safePlay(clip.audioEl);
-    clip.fadeGainNode.gain.linearRampToValueAtTime(1, audioCtx.currentTime + fadeSec);
+    clip.fadeNode.gain.linearRampToValueAtTime(1, audioCtx.currentTime + sec);
   } else {
-    clip.fadeGainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+    setFadeNow(clip, 1);
     clip.audioEl.currentTime = 0;
     await safePlay(clip.audioEl);
   }
 }
+async function resumeWithFade(clip) {
+  clearClipFadeTimer(clip);
 
-async function resumeClipWithFade(clip) {
-  const fadeSec = Math.max(0, Number(clip.fadeDuration || 0));
+  const sec = Number(clip.fadeDuration || 0);
 
-  cancelFadeAutomation(clip);
-
-  if (clip.fadeEnabled && fadeSec > 0) {
-    clip.fadeGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+  if (clip.fadeEnabled && sec > 0) {
+    setFadeNow(clip, 0);
     await safePlay(clip.audioEl);
-    clip.fadeGainNode.gain.linearRampToValueAtTime(1, audioCtx.currentTime + fadeSec);
+    clip.fadeNode.gain.linearRampToValueAtTime(1, audioCtx.currentTime + sec);
   } else {
-    clip.fadeGainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+    setFadeNow(clip, 1);
     await safePlay(clip.audioEl);
   }
 }
+function pauseWithFade(clip) {
+  clearClipFadeTimer(clip);
 
-function pauseClipWithFade(clip) {
-  const fadeSec = Math.max(0, Number(clip.fadeDuration || 0));
+  const sec = Number(clip.fadeDuration || 0);
 
-  cancelFadeAutomation(clip);
-
-  if (!clip.fadeEnabled || fadeSec <= 0 || clip.audioEl.paused) {
+  if (!clip.fadeEnabled || sec <= 0 || clip.audioEl.paused) {
     clip.audioEl.pause();
-    clip.fadeGainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+    setFadeNow(clip, 1);
     return;
   }
 
-  clip.isFadingOut = true;
   const now = audioCtx.currentTime;
-  const currentVal = clip.fadeGainNode.gain.value;
+  const current = clip.fadeNode.gain.value;
 
-  clip.fadeGainNode.gain.setValueAtTime(currentVal, now);
-  clip.fadeGainNode.gain.linearRampToValueAtTime(0, now + fadeSec);
+  clip.fadeNode.gain.cancelScheduledValues(now);
+  clip.fadeNode.gain.setValueAtTime(current, now);
+  clip.fadeNode.gain.linearRampToValueAtTime(0, now + sec);
 
-  window.setTimeout(() => {
+  clip.fadeTimer = setTimeout(() => {
     clip.audioEl.pause();
-    clip.isFadingOut = false;
-    clip.fadeGainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-  }, fadeSec * 1000);
+    setFadeNow(clip, 1);
+    clip.fadeTimer = null;
+  }, sec * 1000);
+}
+function stopAllAudio(){
+  state.clips.forEach(c => pauseWithFade(c));
+  updateNowPlaying();
 }
 
 /** ========= 미니 슬롯(Render/Drag) ========= **/
@@ -556,22 +521,28 @@ async function addAudioFile(file, pendingConfig = null) {
 
   const srcNode = audioCtx.createMediaElementSource(audioEl);
 
-  // 개별 볼륨
   const gainNode = audioCtx.createGain();
   gainNode.gain.value = pendingConfig?.volume ?? 1.0;
 
-  // 페이드 제어용
-  const fadeGainNode = audioCtx.createGain();
-  fadeGainNode.gain.value = 1.0;
+  const fadeNode = audioCtx.createGain();
+  fadeNode.gain.value = 1.0;
 
-  // dry / wet
-  const dryGain = audioCtx.createGain();
-  const wetGain = audioCtx.createGain();
+  const dryNode = audioCtx.createGain();
+  const wetNode = audioCtx.createGain();
+
+  const convolver = audioCtx.createConvolver();
+  convolver.buffer = createImpulseResponse(audioCtx, 2.0, 2.0);
+
+  wetNode.gain.value = pendingConfig?.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
 
   srcNode.connect(gainNode);
-  gainNode.connect(fadeGainNode);
-  fadeGainNode.connect(dryGain);
-  fadeGainNode.connect(wetGain);
+  gainNode.connect(fadeNode);
+  fadeNode.connect(dryNode);
+  fadeNode.connect(convolver);
+  convolver.connect(wetNode);
+
+  dryNode.connect(mainMasterGain);
+  wetNode.connect(mainMasterGain);
 
   const fileMeta = {
     name: file.name,
@@ -589,9 +560,10 @@ async function addAudioFile(file, pendingConfig = null) {
     audioEl,
     srcNode,
     gainNode,
-    fadeGainNode,
-    dryGain,
-    wetGain,
+    fadeNode,
+    dryNode,
+    wetNode,
+    convolver,
     loop: pendingConfig?.loop ?? true,
     fadeEnabled: pendingConfig?.fadeEnabled ?? DEFAULT_FADE_ENABLED,
     fadeDuration: pendingConfig?.fadeDuration ?? DEFAULT_FADE_DURATION,
@@ -600,10 +572,8 @@ async function addAudioFile(file, pendingConfig = null) {
     slot: null,
     ui: {},
     pendingConfig,
-    isFadingOut: false
+    fadeTimer: null
   };
-
-  applyOutputRouting(clip);
 
   state.clips.push(clip);
   addClipCard(clip);
@@ -704,7 +674,6 @@ function addClipCard(clip){
   const body = document.createElement('div');
   body.className='card-body';
 
-  // 시간/진행바
   const progWrap = document.createElement('div');
   progWrap.className='prog-wrap';
 
@@ -736,7 +705,6 @@ function addClipCard(clip){
   progWrap.appendChild(seek);
   progWrap.appendChild(progRow);
 
-  // 재생/정지/이어재생 + 삭제
   const ctrlRow = document.createElement('div');
   ctrlRow.className='controls';
 
@@ -757,10 +725,10 @@ function addClipCard(clip){
   delBtn.textContent='삭제';
 
   playBtn.addEventListener('click', async ()=>{
-    await playClipWithFade(clip, 'main');
+    await playWithFade(clip, 'main');
   });
-  pauseBtn.addEventListener('click', ()=> pauseClipWithFade(clip));
-  resumeBtn.addEventListener('click', async ()=> { await resumeClipWithFade(clip); });
+  pauseBtn.addEventListener('click', ()=> pauseWithFade(clip));
+  resumeBtn.addEventListener('click', async ()=> { await resumeWithFade(clip); });
   delBtn.addEventListener('click', ()=> deleteClip(clip));
 
   ctrlRow.appendChild(playBtn);
@@ -768,7 +736,6 @@ function addClipCard(clip){
   ctrlRow.appendChild(resumeBtn);
   ctrlRow.appendChild(delBtn);
 
-  // 반복 토글
   const loopRow = document.createElement('div');
   loopRow.className='controls';
 
@@ -787,52 +754,49 @@ function addClipCard(clip){
   loopRow.appendChild(loopBtn);
   loopRow.appendChild(mkSmall('이 음원을 무한 반복할지 선택 (기본 ON)'));
 
-    // 페이드 토글
   const fadeRow = document.createElement('div');
   fadeRow.className = 'controls';
 
   const fadeBtn = document.createElement('button');
   fadeBtn.className = 'btn';
 
-  const fadeLabel = () => {
+  const updateFadeBtn = () => {
     fadeBtn.textContent = '페이드 인/아웃: ' + (clip.fadeEnabled ? 'ON' : 'OFF');
   };
-  fadeLabel();
+  updateFadeBtn();
 
   fadeBtn.onclick = () => {
     clip.fadeEnabled = !clip.fadeEnabled;
-    fadeLabel();
+    updateFadeBtn();
   };
 
   fadeRow.appendChild(fadeBtn);
   fadeRow.appendChild(
-    mkSmall(`재생/정지 시 앞뒤로 약 ${clip.fadeDuration}초 페이드가 적용됩니다.`)
+    mkSmall(`재생/정지 시 약 ${clip.fadeDuration}초 페이드가 적용됩니다.`)
   );
 
-    // 리버브 토글
   const reverbRow = document.createElement('div');
   reverbRow.className = 'controls';
 
   const reverbBtn = document.createElement('button');
   reverbBtn.className = 'btn';
 
-  const reverbLabel = () => {
+  const updateReverbBtn = () => {
     reverbBtn.textContent = '리버브: ' + (clip.reverbEnabled ? 'ON' : 'OFF');
   };
-  reverbLabel();
+  updateReverbBtn();
 
   reverbBtn.onclick = () => {
     clip.reverbEnabled = !clip.reverbEnabled;
-    applyOutputRouting(clip);
-    reverbLabel();
+    clip.wetNode.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+    updateReverbBtn();
   };
 
   reverbRow.appendChild(reverbBtn);
   reverbRow.appendChild(
-    mkSmall('공간감이 있는 잔향 효과를 적용합니다. 배경음 분위기용으로 사용하세요.')
+    mkSmall('잔향 효과를 켜거나 끕니다.')
   );
 
-  // 개별 볼륨
   const volWrap = document.createElement('div');
   volWrap.className='col';
 
@@ -865,7 +829,6 @@ function addClipCard(clip){
   volRow.appendChild(volVal);
   volWrap.appendChild(volRow);
 
-  // 미니보드 할당
   const assignRow = document.createElement('div');
   assignRow.className='controls';
 
@@ -885,7 +848,10 @@ function addClipCard(clip){
     const idx = parseInt(slotSelect.value,10);
 
     const existingOwner = state.clips.find(c => c.slot === idx && c.id !== clip.id);
-    if (existingOwner) existingOwner.slot = null;
+    if (existingOwner) {
+      existingOwner.slot = null;
+      state.miniSlots[idx] = null;
+    }
 
     state.miniSlots[idx] = { clipId: clip.id, name: clip.name };
     clip.slot = idx;
@@ -992,32 +958,40 @@ function updateNowPlaying(){
 
 /** ========= 라우팅/삭제/정지/볼륨 ========= **/
 function routeClip(clip, route, badgeEl){
+  if (clip.route === route) {
+    badgeEl.textContent = (route === 'mini' ? '미니' : '메인') + (clip.audioEl.paused ? ' 출력' : ' 출력 · 재생중');
+    return;
+  }
+
+  try { clip.dryNode.disconnect(); } catch(_){}
+  try { clip.wetNode.disconnect(); } catch(_){}
+
+  if (route === 'main') {
+    clip.dryNode.connect(mainMasterGain);
+    clip.wetNode.connect(mainMasterGain);
+  } else {
+    clip.dryNode.connect(miniMasterGain);
+    clip.wetNode.connect(miniMasterGain);
+  }
+
   clip.route = route;
-  applyOutputRouting(clip);
-
-  badgeEl.textContent = (route === 'mini' ? '미니' : '메인') +
-    (clip.audioEl.paused ? ' 출력' : ' 출력 · 재생중');
-}
-
-  try { clip.srcNode.disconnect(); } catch(_){}
-
-  if (route==='main') clip.srcNode.connect(clip.gainNode).connect(mainMasterGain);
-  else clip.srcNode.connect(clip.gainNode).connect(miniMasterGain);
-
-  clip.route=route;
-  badgeEl.textContent=(route==='mini'?'미니':'메인')+(clip.audioEl.paused?' 출력':' 출력 · 재생중');
+  badgeEl.textContent = (route === 'mini' ? '미니' : '메인') + (clip.audioEl.paused ? ' 출력' : ' 출력 · 재생중');
 }
 
 function deleteClip(clip){
+  clearClipFadeTimer(clip);
+
   try { clip.audioEl.pause(); } catch(_){}
   state.miniSlots = state.miniSlots.map(s=> s && s.clipId===clip.id ? null : s);
   renderMiniGrid();
 
   try { clip.srcNode.disconnect(); } catch(_){}
   try { clip.gainNode.disconnect(); } catch(_){}
-  try { clip.fadeGainNode.disconnect(); } catch(_){}
-  try { clip.dryGain.disconnect(); } catch(_){}
-  try { clip.wetGain.disconnect(); } catch(_){}
+  try { clip.fadeNode.disconnect(); } catch(_){}
+  try { clip.dryNode.disconnect(); } catch(_){}
+  try { clip.wetNode.disconnect(); } catch(_){}
+  try { clip.convolver.disconnect(); } catch(_){}
+
   state.clips = state.clips.filter(c=> c.id!==clip.id);
 
   const card=document.getElementById(`clip-${clip.id}`);
@@ -1042,6 +1016,8 @@ function applyClipConfig(clip, cfg){
   clip.ui.vol.value = String(clip.gainNode.gain.value);
   clip.ui.volVal.textContent = (+clip.gainNode.gain.value).toFixed(2);
 
+  clip.wetNode.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+
   clip.ui.loopBtn.textContent = '반복: ' + (clip.loop ? 'ON' : 'OFF');
   if (clip.ui.fadeBtn) {
     clip.ui.fadeBtn.textContent = '페이드 인/아웃: ' + (clip.fadeEnabled ? 'ON' : 'OFF');
@@ -1055,7 +1031,10 @@ function applyClipConfig(clip, cfg){
 
   if (Number.isInteger(cfg.slot) && cfg.slot >= 0 && cfg.slot < 10) {
     const existingOwner = state.clips.find(c => c.slot === cfg.slot && c.id !== clip.id);
-    if (existingOwner) existingOwner.slot = null;
+    if (existingOwner) {
+      existingOwner.slot = null;
+      state.miniSlots[cfg.slot] = null;
+    }
     state.miniSlots[cfg.slot] = { clipId: clip.id, name: clip.name };
     clip.slot = cfg.slot;
     clip.ui.slotSelect.value = String(cfg.slot);
@@ -1064,10 +1043,10 @@ function applyClipConfig(clip, cfg){
 }
 
 stopMainBtn.onclick = ()=> {
-  state.clips.filter(c => c.route === 'main').forEach(c => pauseClipWithFade(c));
+  state.clips.filter(c=>c.route==='main').forEach(c=> pauseWithFade(c));
 };
 stopMiniBtn.onclick = ()=> {
-  state.clips.filter(c => c.route === 'mini').forEach(c => pauseClipWithFade(c));
+  state.clips.filter(c=>c.route==='mini').forEach(c=> pauseWithFade(c));
 };
 
 masterVol.oninput = ()=>{
@@ -1093,7 +1072,6 @@ resetHotkeyBtn.addEventListener('click', ()=>{
 });
 
 window.addEventListener('keydown', async (e)=>{
-  // 단축키 지정 모드
   if (state.captureHotkeyMode) {
     e.preventDefault();
 
@@ -1120,20 +1098,17 @@ window.addEventListener('keydown', async (e)=>{
     return;
   }
 
-  // 입력창 내 타이핑 중이면 미니보드/전체정지 무시
   const target = e.target;
   const tag = target?.tagName?.toLowerCase();
   const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
   if (isTyping) return;
 
-  // 전체 정지 단축키
   if (normalizeHotkey(e.key) === state.stopHotkey) {
     e.preventDefault();
     stopAllAudio();
     return;
   }
 
-  // 미니보드 1~0
   const map={'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'0':9};
   if (!(e.key in map)) return;
 
@@ -1144,9 +1119,8 @@ window.addEventListener('keydown', async (e)=>{
   const clip=state.clips.find(c=> c.id===slot.clipId);
   if (!clip) return;
 
-  const badgeEl=clip.ui?.badge || {textContent:''};
   clip.audioEl.loop = clip.loop;
-  await playClipWithFade(clip, 'mini');
+  await playWithFade(clip, 'mini');
 });
 
 /** ========= 설정 내보내기 / 불러오기 ========= **/
