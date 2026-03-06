@@ -1055,24 +1055,41 @@ function updateNowPlaying(){
 
 /** ========= 라우팅/삭제/정지/볼륨 ========= **/
 function routeClip(clip, route, badgeEl){
-  if (clip.route === route) {
-    badgeEl.textContent = (route === 'mini' ? '미니' : '메인') + (clip.audioEl.paused ? ' 출력' : ' 출력 · 재생중');
+  if (!clip) {
+    console.error('routeClip: clip 없음');
     return;
   }
 
-  try { clip.dryNode.disconnect(); } catch(_){}
-  try { clip.wetNode.disconnect(); } catch(_){}
+  const targetMaster = route === 'main' ? mainMasterGain : miniMasterGain;
 
-  if (route === 'main') {
-    clip.dryNode.connect(mainMasterGain);
-    clip.wetNode.connect(mainMasterGain);
-  } else {
-    clip.dryNode.connect(miniMasterGain);
-    clip.wetNode.connect(miniMasterGain);
+  // 새 구조: outputNode 사용
+  if (clip.outputNode) {
+    try { clip.outputNode.disconnect(); } catch(_) {}
+    clip.outputNode.connect(targetMaster);
+  }
+  // 구 구조: dry/wet 사용
+  else if (clip.dryNode || clip.wetNode) {
+    if (clip.dryNode) {
+      try { clip.dryNode.disconnect(); } catch(_) {}
+      clip.dryNode.connect(targetMaster);
+    }
+    if (clip.wetNode) {
+      try { clip.wetNode.disconnect(); } catch(_) {}
+      clip.wetNode.connect(targetMaster);
+    }
+  }
+  else {
+    console.error('routeClip: 라우팅 가능한 노드가 없음', clip);
+    return;
   }
 
   clip.route = route;
-  badgeEl.textContent = (route === 'mini' ? '미니' : '메인') + (clip.audioEl.paused ? ' 출력' : ' 출력 · 재생중');
+
+  if (badgeEl) {
+    badgeEl.textContent =
+      (route === 'mini' ? '미니' : '메인') +
+      (clip.audioEl?.paused ? ' 출력' : ' 출력 · 재생중');
+  }
 }
 
 function deleteClip(clip){
@@ -1082,12 +1099,14 @@ function deleteClip(clip){
   state.miniSlots = state.miniSlots.map(s => s && s.clipId === clip.id ? null : s);
   renderMiniGrid();
 
-  try { clip.srcNode.disconnect(); } catch(_){}
-  try { clip.gainNode.disconnect(); } catch(_){}
-  try { clip.fadeNode.disconnect(); } catch(_){}
-  try { clip.outputNode.disconnect(); } catch(_){}
-  try { clip.convolver.disconnect(); } catch(_){}
-  try { clip.wetGain.disconnect(); } catch(_){}
+  try { clip.srcNode?.disconnect(); } catch(_){}
+  try { clip.gainNode?.disconnect(); } catch(_){}
+  try { clip.fadeNode?.disconnect(); } catch(_){}
+  try { clip.outputNode?.disconnect(); } catch(_){}
+  try { clip.dryNode?.disconnect(); } catch(_){}
+  try { clip.wetNode?.disconnect(); } catch(_){}
+  try { clip.convolver?.disconnect(); } catch(_){}
+  try { clip.wetGain?.disconnect(); } catch(_){}
 
   state.clips = state.clips.filter(c => c.id !== clip.id);
 
