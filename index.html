@@ -46,7 +46,11 @@
   .kv{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .range{width:100%}
   .small{font-size:12px;color:var(--muted)}
-  .hotbar{display:grid;grid-template-columns:repeat(10,1fr);gap:8px}
+  .hotbar{
+    display:grid;
+    grid-template-columns:repeat(5, 1fr);
+    gap:8px;
+  }
   .slot{background:#0f1624;border:1px dashed #334469;border-radius:12px;min-height:84px;padding:8px;display:flex;flex-direction:column;gap:6px;justify-content:center;align-items:center}
   .slot .k{font-size:12px;color:#a3b6da}
   .slot .name{font-weight:700;font-size:12px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
