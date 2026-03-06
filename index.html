@@ -512,87 +512,109 @@ renderMiniGrid();
 
 /** ========= 파일 업로드/복원 공통 ========= **/
 async function addAudioFile(file, pendingConfig = null) {
-  const url = URL.createObjectURL(file);
-  const audioEl = new Audio(url);
-  audioEl.preload = 'auto';
-  audioEl.crossOrigin = 'anonymous';
-  audioEl.controls = false;
-  audioEl.loop = pendingConfig?.loop ?? true;
+  try {
+    const url = URL.createObjectURL(file);
+    const audioEl = new Audio(url);
+    audioEl.preload = 'auto';
+    audioEl.crossOrigin = 'anonymous';
+    audioEl.controls = false;
+    audioEl.loop = pendingConfig?.loop ?? true;
 
-  const srcNode = audioCtx.createMediaElementSource(audioEl);
+    const srcNode = audioCtx.createMediaElementSource(audioEl);
 
-  const gainNode = audioCtx.createGain();
-  gainNode.gain.value = pendingConfig?.volume ?? 1.0;
+    // 기본 개별 볼륨
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = pendingConfig?.volume ?? 1.0;
 
-  const fadeNode = audioCtx.createGain();
-  fadeNode.gain.value = 1.0;
+    // 페이드용
+    const fadeNode = audioCtx.createGain();
+    fadeNode.gain.value = 1.0;
 
-  const dryNode = audioCtx.createGain();
-  const wetNode = audioCtx.createGain();
+    // 최종 출력용 (이 노드만 main/mini로 라우팅)
+    const outputNode = audioCtx.createGain();
+    outputNode.gain.value = 1.0;
 
-  const convolver = audioCtx.createConvolver();
-  convolver.buffer = createImpulseResponse(audioCtx, 2.0, 2.0);
+    // 리버브용
+    const convolver = audioCtx.createConvolver();
+    convolver.buffer = createImpulseResponse(audioCtx, 2.0, 2.0);
 
-  wetNode.gain.value = pendingConfig?.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+    const wetGain = audioCtx.createGain();
+    wetGain.gain.value = pendingConfig?.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
 
-  srcNode.connect(gainNode);
-  gainNode.connect(fadeNode);
-  fadeNode.connect(dryNode);
-  fadeNode.connect(convolver);
-  convolver.connect(wetNode);
+    // 가장 안전한 기본 체인
+    // src -> gain -> fade -> output -> main
+    srcNode.connect(gainNode);
+    gainNode.connect(fadeNode);
+    fadeNode.connect(outputNode);
+    outputNode.connect(mainMasterGain);
 
-  dryNode.connect(mainMasterGain);
-  wetNode.connect(mainMasterGain);
+    // 리버브는 send 방식으로만 추가
+    fadeNode.connect(convolver);
+    convolver.connect(wetGain);
+    wetGain.connect(outputNode);
 
-  const fileMeta = {
-    name: file.name,
-    size: file.size,
-    lastModified: file.lastModified
-  };
+    const fileMeta = {
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified
+    };
 
-  const clip = {
-    id: crypto.randomUUID(),
-    fileKey: makeFileKey(fileMeta),
-    fileMeta,
-    name: file.name,
-    size: file.size,
-    lastModified: file.lastModified,
-    audioEl,
-    srcNode,
-    gainNode,
-    fadeNode,
-    dryNode,
-    wetNode,
-    convolver,
-    loop: pendingConfig?.loop ?? true,
-    fadeEnabled: pendingConfig?.fadeEnabled ?? DEFAULT_FADE_ENABLED,
-    fadeDuration: pendingConfig?.fadeDuration ?? DEFAULT_FADE_DURATION,
-    reverbEnabled: pendingConfig?.reverbEnabled ?? DEFAULT_REVERB_ENABLED,
-    route: 'main',
-    slot: null,
-    ui: {},
-    pendingConfig,
-    fadeTimer: null
-  };
+    const clip = {
+      id: crypto.randomUUID(),
+      fileKey: makeFileKey(fileMeta),
+      fileMeta,
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      audioEl,
+      srcNode,
+      gainNode,
+      fadeNode,
+      outputNode,
+      convolver,
+      wetGain,
+      loop: pendingConfig?.loop ?? true,
+      fadeEnabled: pendingConfig?.fadeEnabled ?? DEFAULT_FADE_ENABLED,
+      fadeDuration: pendingConfig?.fadeDuration ?? DEFAULT_FADE_DURATION,
+      reverbEnabled: pendingConfig?.reverbEnabled ?? DEFAULT_REVERB_ENABLED,
+      route: 'main',
+      slot: null,
+      ui: {},
+      pendingConfig,
+      fadeTimer: null
+    };
 
-  state.clips.push(clip);
-  addClipCard(clip);
-  hookClipEvents(clip);
+    state.clips.push(clip);
+    addClipCard(clip);
+    hookClipEvents(clip);
 
-  if (pendingConfig) {
-    applyClipConfig(clip, pendingConfig);
+    if (pendingConfig) {
+      applyClipConfig(clip, pendingConfig);
+    }
+
+    ensureRAF();
+    return clip;
+  } catch (err) {
+    console.error('addAudioFile 실패:', err);
+    alert(`파일 업로드 중 오류가 발생했습니다.\n${file?.name || ''}\n\n콘솔(F12)에서 addAudioFile 오류를 확인해주세요.`);
+    throw err;
   }
-
-  ensureRAF();
-  return clip;
 }
 
 fileInput.addEventListener('change', async (e) => {
   const files = Array.from(e.target.files || []);
-  for (const file of files) {
-    await addAudioFile(file, null);
+  console.log('선택된 파일 수:', files.length);
+
+  try {
+    for (const file of files) {
+      console.log('업로드 시도:', file.name, file.size, file.lastModified);
+      await addAudioFile(file, null);
+    }
+  } catch (err) {
+    console.error('파일 업로드 처리 실패:', err);
+  } finally {
+    fileInput.value = '';
   }
-  fileInput.value = '';
 });
 
 restoreAudioInput.addEventListener('change', async (e) => {
@@ -788,7 +810,7 @@ function addClipCard(clip){
 
   reverbBtn.onclick = () => {
     clip.reverbEnabled = !clip.reverbEnabled;
-    clip.wetNode.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+    clip.wetGain.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
     updateReverbBtn();
   };
 
@@ -982,19 +1004,19 @@ function deleteClip(clip){
   clearClipFadeTimer(clip);
 
   try { clip.audioEl.pause(); } catch(_){}
-  state.miniSlots = state.miniSlots.map(s=> s && s.clipId===clip.id ? null : s);
+  state.miniSlots = state.miniSlots.map(s => s && s.clipId === clip.id ? null : s);
   renderMiniGrid();
 
   try { clip.srcNode.disconnect(); } catch(_){}
   try { clip.gainNode.disconnect(); } catch(_){}
   try { clip.fadeNode.disconnect(); } catch(_){}
-  try { clip.dryNode.disconnect(); } catch(_){}
-  try { clip.wetNode.disconnect(); } catch(_){}
+  try { clip.outputNode.disconnect(); } catch(_){}
   try { clip.convolver.disconnect(); } catch(_){}
+  try { clip.wetGain.disconnect(); } catch(_){}
 
-  state.clips = state.clips.filter(c=> c.id!==clip.id);
+  state.clips = state.clips.filter(c => c.id !== clip.id);
 
-  const card=document.getElementById(`clip-${clip.id}`);
+  const card = document.getElementById(`clip-${clip.id}`);
   if (card && card.parentNode) card.parentNode.removeChild(card);
 
   updateNowPlaying();
@@ -1016,7 +1038,7 @@ function applyClipConfig(clip, cfg){
   clip.ui.vol.value = String(clip.gainNode.gain.value);
   clip.ui.volVal.textContent = (+clip.gainNode.gain.value).toFixed(2);
 
-  clip.wetNode.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
+  clip.wetGain.gain.value = clip.reverbEnabled ? DEFAULT_REVERB_MIX : 0;
 
   clip.ui.loopBtn.textContent = '반복: ' + (clip.loop ? 'ON' : 'OFF');
   if (clip.ui.fadeBtn) {
