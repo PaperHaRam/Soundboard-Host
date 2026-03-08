@@ -176,7 +176,7 @@
       </div>
 
       <div id="ytShareNotice" class="yt-state">
-        유튜브 영상은 페이지 안에서 재생/정지/반복/대기열 제어까지 지원합니다. 다만 iframe 기반 유튜브 오디오는 브라우저/유튜브 보안 정책상 기존 PeerJS 믹서에 직접 합쳐서 공유할 수 없습니다.
+        유튜브는 이 페이지 안에서 재생/정지/반복/대기열 제어를 지원합니다. 탭 공유 시작 후 현재 탭을 선택하고 탭 오디오 공유를 켜면, 브라우저가 허용하는 범위에서 유튜브 소리까지 함께 송출을 시도합니다.
       </div>
 
       <div class="yt-player-shell">
@@ -217,6 +217,8 @@
 </main>
 
 <div class="foot">
+  <button id="startTabShare" class="btn btn-blue">탭 공유 시작</button>
+  <button id="stopTabShare" class="btn btn-danger">탭 공유 중지</button>
   <button id="makeCode" class="btn btn-accent">공유 코드 생성</button>
   <div class="codebox">
     <span class="small">공유 코드</span>
@@ -272,6 +274,55 @@ overallMaster.connect(audioCtx.destination);
 const shareDest = audioCtx.createMediaStreamDestination();
 overallMaster.connect(shareDest);
 
+function getCurrentShareStream() {
+  return state.tabShareStream || shareDest.stream;
+}
+
+function updateShareStatus(extra = '') {
+  const base = state.usingTabShare
+    ? '탭 송출 사용 중'
+    : '내장 믹서 송출 사용 중';
+
+  peerStatus.textContent = extra ? `${base} · ${extra}` : base;
+}
+
+async function restartPeerCallsWithCurrentStream() {
+  if (!state.peer || !state.connectedPeers.size) return;
+
+  const stream = getCurrentShareStream();
+
+  for (const peerId of state.connectedPeers) {
+    try {
+      const oldCall = state.peerCalls.get(peerId);
+      if (oldCall) {
+        try { oldCall.close(); } catch (_) {}
+      }
+
+      const call = state.peer.call(peerId, stream, {
+        metadata: {
+          kind: state.tabShareStream ? 'tabshare' : 'mixaudio'
+        }
+      });
+
+      state.peerCalls.set(peerId, call);
+
+      call.on('close', () => {
+        if (state.peerCalls.get(peerId) === call) {
+          state.peerCalls.delete(peerId);
+        }
+      });
+
+      call.on('error', () => {
+        if (state.peerCalls.get(peerId) === call) {
+          state.peerCalls.delete(peerId);
+        }
+      });
+    } catch (err) {
+      console.error('재송출 call 실패:', peerId, err);
+    }
+  }
+}
+
 /** ========= 상태 & UI ========= **/
 const STORAGE_KEY = 'soundboard_host_config_v1';
 const DEFAULT_STOP_HOTKEY = 'F8';
@@ -281,11 +332,15 @@ const state = {
   miniSlots: Array(10).fill(null),
   peer: null,
   connectedPeers: new Set(),
+  peerCalls: new Map(),
   code: null,
   rafId: null,
   stopHotkey: DEFAULT_STOP_HOTKEY,
   captureHotkeyMode: false,
-  pendingImportConfig: null
+  pendingImportConfig: null,
+  tabShareStream: null,
+  activeShareStream: null,
+  usingTabShare: false
 };
 
 const ytState = {
@@ -323,6 +378,8 @@ const stopHotkeyView = document.getElementById('stopHotkeyView');
 const makeCodeBtn = document.getElementById('makeCode');
 const shareCodeEl = document.getElementById('shareCode');
 const peerStatus = document.getElementById('peerStatus');
+  const startTabShareBtn = document.getElementById('startTabShare');
+const stopTabShareBtn = document.getElementById('stopTabShare');
 
 const ytUrlInput = document.getElementById('ytUrlInput');
 const ytAddBtn = document.getElementById('ytAddBtn');
@@ -437,6 +494,67 @@ function renderHotkey(){
 }
 
 /** ========= 유튜브 ========= **/
+
+async function startTabShare() {
+  if (state.tabShareStream) {
+    alert('이미 탭 공유가 활성화되어 있습니다.');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        displaySurface: 'browser'
+      },
+      audio: true
+    });
+
+    state.tabShareStream = stream;
+    state.activeShareStream = stream;
+    state.usingTabShare = true;
+
+    const [videoTrack] = stream.getVideoTracks();
+    const [audioTrack] = stream.getAudioTracks();
+
+    if (!audioTrack) {
+      alert('선택한 공유 대상에서 오디오 트랙이 잡히지 않았습니다.\n공유 창에서 현재 탭을 선택하고 "탭 오디오 공유"를 켜야 합니다.');
+    }
+
+    const stopByBrowser = () => {
+      stopTabShare(true);
+    };
+
+    if (videoTrack) videoTrack.addEventListener('ended', stopByBrowser, { once: true });
+    if (audioTrack) audioTrack.addEventListener('ended', stopByBrowser, { once: true });
+
+    await restartPeerCallsWithCurrentStream();
+    updateShareStatus('현재 탭을 송출 중');
+  } catch (err) {
+    console.error('탭 공유 시작 실패:', err);
+    alert('탭 공유를 시작하지 못했습니다.\n공유 창에서 현재 탭을 선택하고 오디오 공유를 켰는지 확인하세요.');
+  }
+}
+
+async function stopTabShare(byBrowser = false) {
+  if (!state.tabShareStream) {
+    if (!byBrowser) alert('현재 활성화된 탭 공유가 없습니다.');
+    return;
+  }
+
+  try {
+    state.tabShareStream.getTracks().forEach(track => {
+      try { track.stop(); } catch (_) {}
+    });
+  } catch (_) {}
+
+  state.tabShareStream = null;
+  state.activeShareStream = shareDest.stream;
+  state.usingTabShare = false;
+
+  await restartPeerCallsWithCurrentStream();
+  updateShareStatus(byBrowser ? '브라우저에서 탭 공유가 종료됨' : '탭 공유 중지됨');
+}
+  
 function parseYouTubeId(input) {
   if (!input) return null;
   const raw = input.trim();
@@ -714,6 +832,8 @@ ytClearQueueBtn.addEventListener('click', () => {
 ytPlayBtn.addEventListener('click', playCurrentYoutube);
 ytPauseBtn.addEventListener('click', pauseYoutube);
 ytStopBtn.addEventListener('click', stopYoutube);
+startTabShareBtn.addEventListener('click', startTabShare);
+stopTabShareBtn.addEventListener('click', () => stopTabShare(false));
 ytPrevBtn.addEventListener('click', playPrevYoutube);
 ytNextBtn.addEventListener('click', playNextYoutube);
 
@@ -1808,34 +1928,62 @@ makeCodeBtn.onclick = ()=>{
   peerStatus.textContent="신호 서버 연결 중…";
 
   peer.on('open', (id)=>{
-    peerStatus.textContent=`준비됨: 코드 ${id} (청취자 접속 시 오디오 전송)`;
+    updateShareStatus(`준비됨: 코드 ${id}`);
   });
 
   peer.on('connection', (conn)=>{
     state.connectedPeers.add(conn.peer);
 
     conn.on('open', ()=>{
-      const stream=shareDest.stream;
-      state.peer.call(conn.peer, stream, {metadata:{kind:'mixaudio'}});
+      const stream = getCurrentShareStream();
+
+      const call = state.peer.call(conn.peer, stream, {
+        metadata: {
+          kind: state.tabShareStream ? 'tabshare' : 'mixaudio'
+        }
+      });
+
+      state.peerCalls.set(conn.peer, call);
+
+      call.on('close', () => {
+        if (state.peerCalls.get(conn.peer) === call) {
+          state.peerCalls.delete(conn.peer);
+        }
+      });
+
+      call.on('error', () => {
+        if (state.peerCalls.get(conn.peer) === call) {
+          state.peerCalls.delete(conn.peer);
+        }
+      });
+
       conn.send({
         type:'hello',
         now:Date.now(),
         code:state.code,
-        note:'유튜브 iframe 오디오는 브라우저 정책상 이 믹서 스트림에 직접 합쳐지지 않습니다.'
+        mode: state.tabShareStream ? 'tabshare' : 'mixaudio'
       });
-      peerStatus.textContent=`연결 ${state.connectedPeers.size}명`;
+
+      updateShareStatus(`연결 ${state.connectedPeers.size}명`);
     });
 
     conn.on('close', ()=>{
       state.connectedPeers.delete(conn.peer);
-      peerStatus.textContent=`연결 ${state.connectedPeers.size}명`;
+
+      const oldCall = state.peerCalls.get(conn.peer);
+      if (oldCall) {
+        try { oldCall.close(); } catch (_) {}
+        state.peerCalls.delete(conn.peer);
+      }
+
+      updateShareStatus(`연결 ${state.connectedPeers.size}명`);
     });
   });
 
   peer.on('error', (err)=>{
     console.error(err);
-    peerStatus.textContent='오류: '+err.message;
-    alert("Peer 오류: "+err.message);
+    peerStatus.textContent='오류: ' + err.message;
+    alert("Peer 오류: " + err.message);
   });
 
   peer.on('disconnected', ()=>{
@@ -1857,6 +2005,8 @@ renderHotkey();
 renderYoutubeLoopButtons();
 renderYoutubeQueue();
 updateNowPlaying();
+state.activeShareStream = shareDest.stream;
+updateShareStatus('대기 중');
 saveLocalConfig();
 </script>
 </body>
