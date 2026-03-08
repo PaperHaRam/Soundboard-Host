@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="https://files.d20.io/images/402071129/inopr0keybLGc59kJzKp6A/thumb.png"/> 
+<link rel="icon" href="https://files.d20.io/images/402071129/inopr0keybLGc59kJzKp6A/thumb.png"/>
 <link rel="Ha-Ram-icon" href="https://files.d20.io/images/402071129/inopr0keybLGc59kJzKp6A/thumb.png"/>
 <title>Soundboard – 호스트</title>
 <style>
@@ -27,12 +27,7 @@
   .btn-warn{background:linear-gradient(90deg,#f59e0b,#fbbf24);border:0;color:#261400}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .col{display:flex;flex-direction:column;gap:10px}
-  main{
-    padding:18px;
-    display:flex;
-    flex-direction:column;
-    gap:18px;
-  }
+  main{padding:18px;display:flex;flex-direction:column;gap:18px}
   .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
   .panel h2{margin:0 0 10px 0;font-size:15px}
   .panel .hint{color:var(--muted);font-size:12px}
@@ -48,11 +43,7 @@
   .kv{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .range{width:100%}
   .small{font-size:12px;color:var(--muted)}
-  .hotbar{
-    display:grid;
-    grid-template-columns:repeat(5, 1fr);
-    gap:8px;
-  }
+  .hotbar{display:grid;grid-template-columns:repeat(5, 1fr);gap:8px}
   .slot{background:#0f1624;border:1px dashed #334469;border-radius:12px;min-height:84px;padding:8px;display:flex;flex-direction:column;gap:6px;justify-content:center;align-items:center}
   .slot .k{font-size:12px;color:#a3b6da}
   .slot .name{font-weight:700;font-size:12px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
@@ -70,6 +61,19 @@
   input[type="range"].seek{width:100%}
   .np-item{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:10px;background:#0f1624}
   .code-like{padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:#0b1220;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+  .yt-wrap{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .yt-input{display:flex;gap:8px;flex-wrap:wrap}
+  .yt-input input{flex:1;min-width:220px;background:#0b1220;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:10px 12px}
+  .yt-player-shell{border:1px solid var(--line);border-radius:14px;background:#0b1220;padding:10px;display:flex;flex-direction:column;gap:10px}
+  .yt-player-box{width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+  .yt-player-box iframe{width:100%;height:100%}
+  .yt-queue{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto}
+  .yt-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0f1624}
+  .yt-item.active{border-color:#60a5fa;box-shadow:0 0 0 1px rgba(96,165,250,.35) inset}
+  .yt-item-title{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+  .yt-item-meta{font-size:11px;color:var(--muted)}
+  .yt-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .yt-state{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0f1624;font-size:12px;color:#cfe0ff}
 </style>
 </head>
 <body>
@@ -154,6 +158,44 @@
     </div>
 
     <div id="miniGrid" class="hotbar"></div>
+
+    <div class="yt-wrap">
+      <div class="divider"></div>
+      <div class="section-head">
+        <h2>유튜브 대기열</h2>
+        <div class="row">
+          <button id="ytToggleLoopOne" class="btn">현재 영상 반복: OFF</button>
+          <button id="ytToggleLoopQueue" class="btn">대기열 반복: OFF</button>
+        </div>
+      </div>
+
+      <div class="yt-input">
+        <input id="ytUrlInput" type="text" placeholder="유튜브 링크를 입력하세요" />
+        <button id="ytAddBtn" class="btn btn-blue">대기열 추가</button>
+        <button id="ytClearQueueBtn" class="btn btn-danger">대기열 비우기</button>
+      </div>
+
+      <div id="ytShareNotice" class="yt-state">
+        유튜브 영상은 페이지 안에서 재생/정지/반복/대기열 제어까지 지원합니다. 다만 iframe 기반 유튜브 오디오는 브라우저/유튜브 보안 정책상 기존 PeerJS 믹서에 직접 합쳐서 공유할 수 없습니다.
+      </div>
+
+      <div class="yt-player-shell">
+        <div class="yt-player-box">
+          <div id="ytPlayer"></div>
+        </div>
+        <div class="controls">
+          <button id="ytPrevBtn" class="btn">이전</button>
+          <button id="ytPlayBtn" class="btn btn-blue">재생</button>
+          <button id="ytPauseBtn" class="btn">일시정지</button>
+          <button id="ytStopBtn" class="btn btn-danger">정지</button>
+          <button id="ytNextBtn" class="btn">다음</button>
+        </div>
+        <div id="ytNowPlaying" class="small">대기 중</div>
+      </div>
+
+      <div id="ytQueue" class="yt-queue"></div>
+    </div>
+
     <div class="divider"></div>
     <div class="small">
       • 슬롯을 <b>드래그&드롭</b>해 순서를 바꿀 수 있습니다(빈 슬롯 포함).<br/>
@@ -184,6 +226,7 @@
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
 <script>
 /** ========= 오디오 컨텍스트 & 언락 ========= **/
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -210,9 +253,9 @@ async function safePlay(audioEl){
 
 /** ========= 수정용 상수 ========= **/
 const DEFAULT_FADE_ENABLED = true;
-const DEFAULT_FADE_DURATION = 2.0; // ★ 여기 숫자만 바꾸면 페이드 시간 변경
+const DEFAULT_FADE_DURATION = 2.0;
 const DEFAULT_REVERB_ENABLED = false;
-const DEFAULT_REVERB_MIX = 0.5; // ★ 여기 숫자만 바꾸면 리버브 잔향 변경
+const DEFAULT_REVERB_MIX = 0.5;
 
 /** ========= 오디오 그래프 ========= **/
 const mainMasterGain = audioCtx.createGain();
@@ -245,6 +288,16 @@ const state = {
   pendingImportConfig: null
 };
 
+const ytState = {
+  player: null,
+  ready: false,
+  queue: [],
+  currentIndex: -1,
+  loopOne: false,
+  loopQueue: false,
+  isStartedByUser: false
+};
+
 const fileInput = document.getElementById('fileInput');
 const importInput = document.getElementById('importInput');
 const restoreAudioInput = document.getElementById('restoreAudioInput');
@@ -270,6 +323,19 @@ const stopHotkeyView = document.getElementById('stopHotkeyView');
 const makeCodeBtn = document.getElementById('makeCode');
 const shareCodeEl = document.getElementById('shareCode');
 const peerStatus = document.getElementById('peerStatus');
+
+const ytUrlInput = document.getElementById('ytUrlInput');
+const ytAddBtn = document.getElementById('ytAddBtn');
+const ytClearQueueBtn = document.getElementById('ytClearQueueBtn');
+const ytPlayBtn = document.getElementById('ytPlayBtn');
+const ytPauseBtn = document.getElementById('ytPauseBtn');
+const ytStopBtn = document.getElementById('ytStopBtn');
+const ytPrevBtn = document.getElementById('ytPrevBtn');
+const ytNextBtn = document.getElementById('ytNextBtn');
+const ytQueueEl = document.getElementById('ytQueue');
+const ytNowPlaying = document.getElementById('ytNowPlaying');
+const ytToggleLoopOne = document.getElementById('ytToggleLoopOne');
+const ytToggleLoopQueue = document.getElementById('ytToggleLoopQueue');
 
 /** ========= 유틸 ========= **/
 function fmtTime(sec){
@@ -342,7 +408,11 @@ function saveLocalConfig(){
   const payload = {
     stopHotkey: state.stopHotkey,
     mainMasterVolume: mainMasterGain.gain.value,
-    miniMasterVolume: miniMasterGain.gain.value
+    miniMasterVolume: miniMasterGain.gain.value,
+    ytQueue: ytState.queue,
+    ytCurrentIndex: ytState.currentIndex,
+    ytLoopOne: ytState.loopOne,
+    ytLoopQueue: ytState.loopQueue
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 }
@@ -354,6 +424,10 @@ function loadLocalConfig(){
     if (parsed.stopHotkey) state.stopHotkey = parsed.stopHotkey;
     if (typeof parsed.mainMasterVolume === 'number') mainMasterGain.gain.value = parsed.mainMasterVolume;
     if (typeof parsed.miniMasterVolume === 'number') miniMasterGain.gain.value = parsed.miniMasterVolume;
+    if (Array.isArray(parsed.ytQueue)) ytState.queue = parsed.ytQueue;
+    if (typeof parsed.ytCurrentIndex === 'number') ytState.currentIndex = parsed.ytCurrentIndex;
+    ytState.loopOne = !!parsed.ytLoopOne;
+    ytState.loopQueue = !!parsed.ytLoopQueue;
   } catch (e) {
     console.warn('로컬 설정 로드 실패', e);
   }
@@ -361,6 +435,299 @@ function loadLocalConfig(){
 function renderHotkey(){
   stopHotkeyView.textContent = state.stopHotkey || DEFAULT_STOP_HOTKEY;
 }
+
+/** ========= 유튜브 ========= **/
+function parseYouTubeId(input) {
+  if (!input) return null;
+  const raw = input.trim();
+  try {
+    const url = new URL(raw);
+    if (url.hostname.includes('youtu.be')) {
+      return url.pathname.split('/').filter(Boolean)[0] || null;
+    }
+    if (url.hostname.includes('youtube.com')) {
+      if (url.pathname === '/watch') return url.searchParams.get('v');
+      if (url.pathname.startsWith('/shorts/')) return url.pathname.split('/')[2] || null;
+      if (url.pathname.startsWith('/embed/')) return url.pathname.split('/')[2] || null;
+      if (url.pathname.startsWith('/live/')) return url.pathname.split('/')[2] || null;
+    }
+  } catch (_) {
+    if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
+  }
+  return null;
+}
+
+function buildYouTubeItem(url) {
+  const videoId = parseYouTubeId(url);
+  if (!videoId) return null;
+  return {
+    id: crypto.randomUUID(),
+    url,
+    videoId,
+    title: `YouTube ${videoId}`
+  };
+}
+
+function renderYoutubeLoopButtons() {
+  ytToggleLoopOne.textContent = `현재 영상 반복: ${ytState.loopOne ? 'ON' : 'OFF'}`;
+  ytToggleLoopQueue.textContent = `대기열 반복: ${ytState.loopQueue ? 'ON' : 'OFF'}`;
+}
+
+function renderYoutubeQueue() {
+  ytQueueEl.innerHTML = '';
+
+  if (!ytState.queue.length) {
+    ytQueueEl.innerHTML = '<div class="small">등록된 유튜브 대기열이 없습니다.</div>';
+    ytNowPlaying.textContent = '대기 중';
+    saveLocalConfig();
+    return;
+  }
+
+  ytState.queue.forEach((item, idx) => {
+    const row = document.createElement('div');
+    row.className = 'yt-item' + (idx === ytState.currentIndex ? ' active' : '');
+
+    const left = document.createElement('div');
+    left.style.minWidth = '0';
+
+    const title = document.createElement('div');
+    title.className = 'yt-item-title';
+    title.textContent = item.title || `YouTube ${item.videoId}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'yt-item-meta';
+    meta.textContent = `${idx + 1}번 · ${item.videoId}`;
+
+    left.appendChild(title);
+    left.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'yt-actions';
+
+    const playNowBtn = document.createElement('button');
+    playNowBtn.className = 'btn btn-blue';
+    playNowBtn.textContent = '즉시재생';
+    playNowBtn.onclick = () => playYoutubeAt(idx);
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'btn btn-ghost';
+    upBtn.textContent = '위';
+    upBtn.onclick = () => moveYoutubeItem(idx, -1);
+
+    const downBtn = document.createElement('button');
+    downBtn.className = 'btn btn-ghost';
+    downBtn.textContent = '아래';
+    downBtn.onclick = () => moveYoutubeItem(idx, 1);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-danger';
+    removeBtn.textContent = '삭제';
+    removeBtn.onclick = () => removeYoutubeItem(idx);
+
+    actions.appendChild(playNowBtn);
+    actions.appendChild(upBtn);
+    actions.appendChild(downBtn);
+    actions.appendChild(removeBtn);
+
+    row.appendChild(left);
+    row.appendChild(actions);
+    ytQueueEl.appendChild(row);
+  });
+
+  const current = ytState.queue[ytState.currentIndex];
+  ytNowPlaying.textContent = current
+    ? `현재 영상: ${current.title || current.videoId}`
+    : '대기 중';
+
+  saveLocalConfig();
+}
+
+function ensureYoutubePlayer() {
+  if (ytState.player || !window.YT || !YT.Player) return;
+  ytState.player = new YT.Player('ytPlayer', {
+    width: '100%',
+    height: '100%',
+    videoId: '',
+    playerVars: {
+      autoplay: 0,
+      controls: 1,
+      rel: 0,
+      modestbranding: 1,
+      playsinline: 1
+    },
+    events: {
+      onReady: () => {
+        ytState.ready = true;
+        if (ytState.currentIndex >= 0 && ytState.queue[ytState.currentIndex]) {
+          ytState.player.cueVideoById(ytState.queue[ytState.currentIndex].videoId);
+        }
+        renderYoutubeQueue();
+      },
+      onStateChange: (event) => {
+        if (event.data === YT.PlayerState.ENDED) {
+          handleYoutubeEnded();
+        }
+      }
+    }
+  });
+}
+
+window.onYouTubeIframeAPIReady = () => {
+  ensureYoutubePlayer();
+};
+
+function addYoutubeToQueue(url) {
+  const item = buildYouTubeItem(url);
+  if (!item) {
+    alert('유효한 유튜브 링크 또는 videoId가 아닙니다.');
+    return;
+  }
+
+  ytState.queue.push(item);
+  if (ytState.currentIndex === -1) ytState.currentIndex = 0;
+  renderYoutubeQueue();
+}
+
+function playYoutubeAt(idx) {
+  if (!ytState.queue[idx]) return;
+  ensureYoutubePlayer();
+  if (!ytState.ready) {
+    ytState.currentIndex = idx;
+    renderYoutubeQueue();
+    return;
+  }
+  ytState.currentIndex = idx;
+  const item = ytState.queue[idx];
+  ytState.player.loadVideoById(item.videoId);
+  ytState.isStartedByUser = true;
+  renderYoutubeQueue();
+}
+
+function pauseYoutube() {
+  if (!ytState.player || !ytState.ready) return;
+  ytState.player.pauseVideo();
+}
+
+function stopYoutube() {
+  if (!ytState.player || !ytState.ready) return;
+  ytState.player.stopVideo();
+}
+
+function playCurrentYoutube() {
+  if (!ytState.queue.length) return;
+  const idx = ytState.currentIndex >= 0 ? ytState.currentIndex : 0;
+  playYoutubeAt(idx);
+}
+
+function playNextYoutube() {
+  if (!ytState.queue.length) return;
+  if (ytState.currentIndex < ytState.queue.length - 1) {
+    playYoutubeAt(ytState.currentIndex + 1);
+    return;
+  }
+  if (ytState.loopQueue) {
+    playYoutubeAt(0);
+  }
+}
+
+function playPrevYoutube() {
+  if (!ytState.queue.length) return;
+  if (ytState.currentIndex > 0) {
+    playYoutubeAt(ytState.currentIndex - 1);
+    return;
+  }
+  if (ytState.loopQueue) {
+    playYoutubeAt(ytState.queue.length - 1);
+  }
+}
+
+function handleYoutubeEnded() {
+  if (!ytState.queue.length) return;
+  if (ytState.loopOne) {
+    playYoutubeAt(ytState.currentIndex);
+    return;
+  }
+  if (ytState.currentIndex < ytState.queue.length - 1) {
+    playYoutubeAt(ytState.currentIndex + 1);
+    return;
+  }
+  if (ytState.loopQueue) {
+    playYoutubeAt(0);
+    return;
+  }
+  renderYoutubeQueue();
+}
+
+function moveYoutubeItem(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= ytState.queue.length) return;
+  const temp = ytState.queue[index];
+  ytState.queue[index] = ytState.queue[target];
+  ytState.queue[target] = temp;
+
+  if (ytState.currentIndex === index) ytState.currentIndex = target;
+  else if (ytState.currentIndex === target) ytState.currentIndex = index;
+
+  renderYoutubeQueue();
+}
+
+function removeYoutubeItem(index) {
+  const isCurrent = index === ytState.currentIndex;
+  ytState.queue.splice(index, 1);
+
+  if (!ytState.queue.length) {
+    ytState.currentIndex = -1;
+    stopYoutube();
+    renderYoutubeQueue();
+    return;
+  }
+
+  if (index < ytState.currentIndex) ytState.currentIndex -= 1;
+  else if (isCurrent) ytState.currentIndex = Math.min(index, ytState.queue.length - 1);
+
+  renderYoutubeQueue();
+
+  if (isCurrent) {
+    if (ytState.ready) ytState.player.cueVideoById(ytState.queue[ytState.currentIndex].videoId);
+  }
+}
+
+ytAddBtn.addEventListener('click', () => {
+  addYoutubeToQueue(ytUrlInput.value);
+  ytUrlInput.value = '';
+});
+
+ytUrlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    ytAddBtn.click();
+  }
+});
+
+ytClearQueueBtn.addEventListener('click', () => {
+  ytState.queue = [];
+  ytState.currentIndex = -1;
+  stopYoutube();
+  renderYoutubeQueue();
+});
+
+ytPlayBtn.addEventListener('click', playCurrentYoutube);
+ytPauseBtn.addEventListener('click', pauseYoutube);
+ytStopBtn.addEventListener('click', stopYoutube);
+ytPrevBtn.addEventListener('click', playPrevYoutube);
+ytNextBtn.addEventListener('click', playNextYoutube);
+
+ytToggleLoopOne.addEventListener('click', () => {
+  ytState.loopOne = !ytState.loopOne;
+  renderYoutubeLoopButtons();
+  saveLocalConfig();
+});
+
+ytToggleLoopQueue.addEventListener('click', () => {
+  ytState.loopQueue = !ytState.loopQueue;
+  renderYoutubeLoopButtons();
+  saveLocalConfig();
+});
 
 /** ========= 리버브 ========= **/
 function createImpulseResponse(ctx, seconds = 2.0, decay = 2.0) {
@@ -446,6 +813,7 @@ function pauseWithFade(clip) {
 }
 function stopAllAudio(){
   state.clips.forEach(c => pauseWithFade(c));
+  stopYoutube();
   updateNowPlaying();
 }
 
@@ -532,37 +900,23 @@ async function addAudioFile(file, pendingConfig = null) {
     audioEl.loop = pendingConfig?.loop ?? true;
 
     const srcNode = audioCtx.createMediaElementSource(audioEl);
-
-    // 기본 개별 볼륨
     const gainNode = audioCtx.createGain();
     gainNode.gain.value = pendingConfig?.volume ?? 1.0;
-
-    // 페이드용
     const fadeNode = audioCtx.createGain();
     fadeNode.gain.value = 1.0;
-
-    // 최종 출력용 (이 노드만 main/mini로 라우팅)
     const outputNode = audioCtx.createGain();
     outputNode.gain.value = 1.0;
-
-    // 리버브용
     const convolver = audioCtx.createConvolver();
     convolver.buffer = createImpulseResponse(audioCtx, 4.0, 2.5);
 
     const wetGain = audioCtx.createGain();
     const initialReverbMix = pendingConfig?.reverbMix ?? DEFAULT_REVERB_MIX;
-    wetGain.gain.value = pendingConfig?.reverbEnabled
-      ? initialReverbMix
-      : 0;
+    wetGain.gain.value = pendingConfig?.reverbEnabled ? initialReverbMix : 0;
 
-    // 가장 안전한 기본 체인
-    // src -> gain -> fade -> output -> main
     srcNode.connect(gainNode);
     gainNode.connect(fadeNode);
     fadeNode.connect(outputNode);
     outputNode.connect(mainMasterGain);
-
-    // 리버브는 send 방식으로만 추가
     fadeNode.connect(convolver);
     convolver.connect(wetGain);
     wetGain.connect(outputNode);
@@ -618,11 +972,8 @@ async function addAudioFile(file, pendingConfig = null) {
 
 fileInput.addEventListener('change', async (e) => {
   const files = Array.from(e.target.files || []);
-  console.log('선택된 파일 수:', files.length);
-
   try {
     for (const file of files) {
-      console.log('업로드 시도:', file.name, file.size, file.lastModified);
       await addAudioFile(file, null);
     }
   } catch (err) {
@@ -761,9 +1112,7 @@ function addClipCard(clip){
   delBtn.className='btn btn-danger';
   delBtn.textContent='삭제';
 
-  playBtn.addEventListener('click', async ()=>{
-    await playWithFade(clip, 'main');
-  });
+  playBtn.addEventListener('click', async ()=>{ await playWithFade(clip, 'main'); });
   pauseBtn.addEventListener('click', ()=> pauseWithFade(clip));
   resumeBtn.addEventListener('click', async ()=> { await resumeWithFade(clip); });
   delBtn.addEventListener('click', ()=> deleteClip(clip));
@@ -794,7 +1143,7 @@ function addClipCard(clip){
   const fadeRow = document.createElement('div');
   fadeRow.className = 'controls';
 
-    const fadeSliderWrap = document.createElement('div');
+  const fadeSliderWrap = document.createElement('div');
   fadeSliderWrap.className = 'col';
 
   const fadeSliderRow = document.createElement('div');
@@ -847,7 +1196,7 @@ function addClipCard(clip){
   const reverbRow = document.createElement('div');
   reverbRow.className = 'controls';
 
-    const reverbSliderWrap = document.createElement('div');
+  const reverbSliderWrap = document.createElement('div');
   reverbSliderWrap.className = 'col';
 
   const reverbSliderRow = document.createElement('div');
@@ -1025,7 +1374,7 @@ function tick(){
     if (!isNaN(a.duration) && a.duration>0){
       const ratio=Math.min(1,Math.max(0,a.currentTime/a.duration));
       c.ui.seek.value=String(ratio);
-      c.ui.curT.textContent=fmtTime(a.currentTime);
+      c.ui.curT.textContent = fmtTime(a.currentTime);
       if (c.loop && !isNaN(a.duration)) c.ui.durT.textContent=fmtTime(a.duration);
     }
 
@@ -1042,7 +1391,16 @@ function ensureRAF(){
 function updateNowPlaying(){
   nowPlayingEl.innerHTML='';
   const playing=state.clips.filter(c=>!c.audioEl.paused && !c.audioEl.ended);
-  if (!playing.length){
+
+  const ytPlaying =
+    ytState.player &&
+    ytState.ready &&
+    typeof YT !== 'undefined' &&
+    ytState.player.getPlayerState &&
+    ytState.player.getPlayerState() === YT.PlayerState.PLAYING &&
+    ytState.queue[ytState.currentIndex];
+
+  if (!playing.length && !ytPlaying){
     nowPlayingEl.innerHTML='<div class="small">재생 중인 트랙이 없습니다.</div>';
     return;
   }
@@ -1062,6 +1420,31 @@ function updateNowPlaying(){
     d.appendChild(right);
     nowPlayingEl.appendChild(d);
   }
+
+  if (ytPlaying) {
+    const current = ytState.queue[ytState.currentIndex];
+    const d = document.createElement('div');
+    d.className = 'np-item';
+
+    const left = document.createElement('div');
+    left.textContent = `[YouTube] ${current.title || current.videoId}`;
+
+    const right = document.createElement('div');
+    right.className = 'small';
+
+    let cur = 0;
+    let dur = 0;
+    try {
+      cur = ytState.player.getCurrentTime?.() || 0;
+      dur = ytState.player.getDuration?.() || 0;
+    } catch (_) {}
+
+    right.textContent = `유튜브 · ${fmtTime(cur)} / ${fmtTime(dur)}`;
+
+    d.appendChild(left);
+    d.appendChild(right);
+    nowPlayingEl.appendChild(d);
+  }
 }
 
 /** ========= 라우팅/삭제/정지/볼륨 ========= **/
@@ -1073,12 +1456,10 @@ function routeClip(clip, route, badgeEl){
 
   const targetMaster = route === 'main' ? mainMasterGain : miniMasterGain;
 
-  // 새 구조: outputNode 사용
   if (clip.outputNode) {
     try { clip.outputNode.disconnect(); } catch(_) {}
     clip.outputNode.connect(targetMaster);
   }
-  // 구 구조: dry/wet 사용
   else if (clip.dryNode || clip.wetNode) {
     if (clip.dryNode) {
       try { clip.dryNode.disconnect(); } catch(_) {}
@@ -1125,12 +1506,15 @@ function deleteClip(clip){
   if (card && card.parentNode) card.parentNode.removeChild(card);
 
   updateNowPlaying();
+  saveLocalConfig();
 }
+
 function clearAllClips(){
   [...state.clips].forEach(c => deleteClip(c));
   state.miniSlots = Array(10).fill(null);
   renderMiniGrid();
 }
+
 function applyClipConfig(clip, cfg){
   clip.loop = cfg.loop ?? true;
   clip.audioEl.loop = clip.loop;
@@ -1204,6 +1588,7 @@ changeHotkeyBtn.addEventListener('click', ()=>{
   state.captureHotkeyMode = true;
   stopHotkeyView.textContent = '입력 대기 중...';
 });
+
 resetHotkeyBtn.addEventListener('click', ()=>{
   state.stopHotkey = DEFAULT_STOP_HOTKEY;
   renderHotkey();
@@ -1250,7 +1635,6 @@ function getMiniHotkeyIndex(e) {
   };
 
   if (e.key in byKey) return byKey[e.key];
-
   return null;
 }
 
@@ -1296,25 +1680,12 @@ window.addEventListener('keydown', async (e)=>{
   if (idx === null) return;
 
   const slot = state.miniSlots[idx];
-  if (!slot) {
-    console.log('미니보드 슬롯 비어 있음:', idx);
-    return;
-  }
+  if (!slot) return;
 
   const clip = state.clips.find(c => c.id === slot.clipId);
-  if (!clip) {
-    console.warn('슬롯에 연결된 clip을 찾지 못함:', idx, slot);
-    return;
-  }
+  if (!clip) return;
 
   e.preventDefault();
-
-  console.log('미니보드 단축키 실행:', {
-    idx,
-    key: e.key,
-    code: e.code,
-    clipName: clip.name
-  });
 
   clip.audioEl.loop = clip.loop;
   await playWithFade(clip, 'mini');
@@ -1323,11 +1694,15 @@ window.addEventListener('keydown', async (e)=>{
 /** ========= 설정 내보내기 / 불러오기 ========= **/
 function buildExportConfig(){
   return {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     stopHotkey: state.stopHotkey,
     mainMasterVolume: mainMasterGain.gain.value,
     miniMasterVolume: miniMasterGain.gain.value,
+    ytQueue: ytState.queue,
+    ytCurrentIndex: ytState.currentIndex,
+    ytLoopOne: ytState.loopOne,
+    ytLoopQueue: ytState.loopQueue,
     clips: state.clips.map(c => ({
       name: c.name,
       size: c.size,
@@ -1392,6 +1767,13 @@ importInput.addEventListener('change', async (e)=>{
       miniMasterVolVal.textContent = parsed.miniMasterVolume.toFixed(2);
     }
 
+    if (Array.isArray(parsed.ytQueue)) ytState.queue = parsed.ytQueue;
+    if (typeof parsed.ytCurrentIndex === 'number') ytState.currentIndex = parsed.ytCurrentIndex;
+    ytState.loopOne = !!parsed.ytLoopOne;
+    ytState.loopQueue = !!parsed.ytLoopQueue;
+    renderYoutubeLoopButtons();
+    renderYoutubeQueue();
+
     saveLocalConfig();
 
     restoreStatus.innerHTML = `설정 불러오기 완료. 이제 <b>복원용 음악 일괄 선택</b>으로 ${parsed.clips.length}개 파일을 한 번에 다시 선택하세요.`;
@@ -1410,6 +1792,7 @@ function genCode(){
   for(let i=0;i<6;i++) s+=alphabet[Math.floor(Math.random()*alphabet.length)];
   return s;
 }
+
 makeCodeBtn.onclick = ()=>{
   if (state.peer){
     alert("이미 코드가 생성되었습니다: " + state.code);
@@ -1434,7 +1817,12 @@ makeCodeBtn.onclick = ()=>{
     conn.on('open', ()=>{
       const stream=shareDest.stream;
       state.peer.call(conn.peer, stream, {metadata:{kind:'mixaudio'}});
-      conn.send({type:'hello', now:Date.now(), code:state.code});
+      conn.send({
+        type:'hello',
+        now:Date.now(),
+        code:state.code,
+        note:'유튜브 iframe 오디오는 브라우저 정책상 이 믹서 스트림에 직접 합쳐지지 않습니다.'
+      });
       peerStatus.textContent=`연결 ${state.connectedPeers.size}명`;
     });
 
@@ -1466,6 +1854,8 @@ miniMasterVol.value = String(miniMasterGain.gain.value);
 miniMasterVolVal.textContent = (+miniMasterGain.gain.value).toFixed(2);
 
 renderHotkey();
+renderYoutubeLoopButtons();
+renderYoutubeQueue();
 updateNowPlaying();
 saveLocalConfig();
 </script>
