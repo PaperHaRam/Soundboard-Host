@@ -381,9 +381,6 @@ const stopTabShareBtn = document.getElementById('stopTabShare');
 const ytUrlInput = document.getElementById('ytUrlInput');
 const ytAddBtn = document.getElementById('ytAddBtn');
 const ytClearQueueBtn = document.getElementById('ytClearQueueBtn');
-const ytPlayBtn = document.getElementById('ytPlayBtn');
-const ytPauseBtn = document.getElementById('ytPauseBtn');
-const ytStopBtn = document.getElementById('ytStopBtn');
 const ytPrevBtn = document.getElementById('ytPrevBtn');
 const ytNextBtn = document.getElementById('ytNextBtn');
 const ytQueueEl = document.getElementById('ytQueue');
@@ -826,9 +823,6 @@ ytClearQueueBtn.addEventListener('click', () => {
   renderYoutubeQueue();
 });
 
-ytPlayBtn.addEventListener('click', playCurrentYoutube);
-ytPauseBtn.addEventListener('click', pauseYoutube);
-ytStopBtn.addEventListener('click', stopYoutube);
 startTabShareBtn.addEventListener('click', startTabShare);
 stopTabShareBtn.addEventListener('click', () => stopTabShare(false));
 ytPrevBtn.addEventListener('click', playPrevYoutube);
