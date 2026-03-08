@@ -498,9 +498,14 @@ async function startTabShare() {
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        displaySurface: 'browser'
+        displaySurface: "browser"
       },
-      audio: true
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      },
+      preferCurrentTab: true
     });
 
     state.tabShareStream = stream;
