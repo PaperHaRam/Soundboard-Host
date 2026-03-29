@@ -250,6 +250,75 @@ async function safePlay(audioEl){
   }
 }
 
+const WEBRTC_CONFIG = {
+  debug: 1,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+      // 제한적인 네트워크(사내망/학교망/통신사 CGNAT/대칭 NAT)까지 안정적으로 통과시키려면
+      // 아래처럼 실제 TURN 서버를 추가해야 합니다.
+      // { urls: 'turn:turn.example.com:3478', username: 'USER', credential: 'PASS' },
+      // { urls: 'turns:turn.example.com:5349', username: 'USER', credential: 'PASS' },
+    ],
+    iceCandidatePoolSize: 10
+  }
+};
+
+// TURN 서버를 실제로 넣은 뒤에만 true로 바꾸세요.
+// true면 TURN relay 경로만 사용하게 되어, 제한망 대응력이 올라가지만 TURN 없이는 연결되지 않습니다.
+const FORCE_RELAY = false;
+if (FORCE_RELAY) {
+  WEBRTC_CONFIG.config.iceTransportPolicy = 'relay';
+}
+
+function hasTurnServer() {
+  return WEBRTC_CONFIG.config.iceServers.some(server => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some(url => String(url).startsWith('turn:') || String(url).startsWith('turns:'));
+  });
+}
+
+function createPeer(id) {
+  return id ? new Peer(id, WEBRTC_CONFIG) : new Peer(undefined, WEBRTC_CONFIG);
+}
+
+function getPeerConnectionFromCall(call) {
+  return call?.peerConnection || call?._pc || null;
+}
+
+function attachCallDebug(call, label) {
+  const pc = getPeerConnectionFromCall(call);
+  if (!pc) return;
+
+  const logState = () => {
+    const parts = [
+      `${label}`,
+      `ice=${pc.iceConnectionState || 'unknown'}`,
+      `pc=${pc.connectionState || 'unknown'}`
+    ];
+    console.log('[WebRTC]', parts.join(' / '));
+    if (pc.iceConnectionState === 'failed' || pc.connectionState === 'failed') {
+      updateShareStatus('연결 실패 감지 - 제한망이면 TURN 서버가 필요할 수 있음');
+    }
+  };
+
+  pc.addEventListener?.('iceconnectionstatechange', logState);
+  pc.addEventListener?.('connectionstatechange', logState);
+  logState();
+}
+
+function getNetworkTroubleshootingText() {
+  if (hasTurnServer()) {
+    return 'STUN/TURN 설정이 적용되어 있습니다. 그래도 안 되면 방화벽, VPN, 프록시, 보안 SW 차단 여부를 확인하세요.';
+  }
+  return '현재는 STUN만 설정된 상태입니다. 일부 사내망/학교망/이동통신망/대칭 NAT 환경에서는 TURN 서버 없이는 소리가 전달되지 않을 수 있습니다.';
+}
+
+if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  console.warn('HTTPS가 아닌 환경에서는 getDisplayMedia / WebRTC 동작이 제한될 수 있습니다.');
+}
+
 /** ========= 수정용 상수 ========= **/
 const DEFAULT_FADE_ENABLED = true;
 const DEFAULT_FADE_DURATION = 2.0;
@@ -302,6 +371,7 @@ async function restartPeerCallsWithCurrentStream() {
       });
 
       state.peerCalls.set(peerId, call);
+      attachCallDebug(call, `재송출:${peerId}`);
 
       call.on('close', () => {
         if (state.peerCalls.get(peerId) === call) {
@@ -530,7 +600,7 @@ async function startTabShare() {
     updateShareStatus('현재 탭을 송출 중');
   } catch (err) {
     console.error('탭 공유 시작 실패:', err);
-    alert('탭 공유를 시작하지 못했습니다.\n공유 창에서 현재 탭을 선택하고 오디오 공유를 켰는지 확인하세요.');
+    alert('탭 공유를 시작하지 못했습니다.\n공유 창에서 현재 탭을 선택하고 오디오 공유를 켰는지 확인하세요.\n\n' + getNetworkTroubleshootingText());
   }
 }
 
@@ -1916,7 +1986,7 @@ makeCodeBtn.onclick = ()=>{
   }
 
   const code=genCode();
-  const peer=new Peer(code,{ debug:1 });
+  const peer = createPeer(code);
 
   state.peer=peer;
   state.code=code;
@@ -1924,7 +1994,10 @@ makeCodeBtn.onclick = ()=>{
   peerStatus.textContent="신호 서버 연결 중…";
 
   peer.on('open', (id)=>{
-    updateShareStatus(`준비됨: 코드 ${id}`);
+    updateShareStatus(`준비됨: 코드 ${id}${hasTurnServer() ? ' / STUN+TURN' : ' / STUN only'}`);
+    if (!hasTurnServer()) {
+      console.warn('TURN 서버가 없어 제한적인 네트워크 환경에서는 청취가 실패할 수 있습니다.');
+    }
   });
 
   peer.on('connection', (conn)=>{
@@ -1940,6 +2013,7 @@ makeCodeBtn.onclick = ()=>{
       });
 
       state.peerCalls.set(conn.peer, call);
+      attachCallDebug(call, `최초송출:${conn.peer}`);
 
       call.on('close', () => {
         if (state.peerCalls.get(conn.peer) === call) {
@@ -1979,7 +2053,7 @@ makeCodeBtn.onclick = ()=>{
   peer.on('error', (err)=>{
     console.error(err);
     peerStatus.textContent='오류: ' + err.message;
-    alert("Peer 오류: " + err.message);
+    alert("Peer 오류: " + err.message + "\n\n" + getNetworkTroubleshootingText());
   });
 
   peer.on('disconnected', ()=>{
